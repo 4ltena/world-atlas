@@ -149,6 +149,35 @@ import WorldAtlasCore
         #expect(body.hasPrefix("[[職人街]]ができた四年後"))
     }
 
+    /// 壊れた節点は原文だけが直す手がかりなので、front matter を落とさず全文を返す。
+    @Test func brokenNodeBodyKeepsTheFrontMatter() async throws {
+        let vault = try SampleVault.copy()
+        // YAML の構文が壊れている。
+        let bad = "---\n名前: 壊れた\n種別: [区\n期間: [1, 現在]\n---\n本文。\n"
+        try bad.write(to: vault.appendingPathComponent("場所/壊れた.md"), atomically: true, encoding: .utf8)
+        // 必須の鍵が無い。
+        let missing = "---\n種別: 区\n期間: [1, 現在]\n---\n本文。\n"
+        try missing.write(to: vault.appendingPathComponent("場所/名無し.md"), atomically: true, encoding: .utf8)
+        let indexer = try Indexer(vault: vault)
+        _ = try await indexer.rebuild()
+        #expect(try await indexer.body(of: "場所/壊れた.md") == bad)
+        #expect(try await indexer.body(of: "場所/名無し.md") == missing)
+        // 正常な節点はこれまでどおり本文だけ。
+        #expect(try await indexer.body(of: "場所/鉄鎚亭.md").hasPrefix("[[職人街]]ができた四年後"))
+    }
+
+    /// 期間 と 効力 の両方を書いたファイルだけが壊れた印になり、他は索引され続ける。
+    @Test func periodAndEffectTogetherBreaksOnlyThatFile() async throws {
+        let vault = try SampleVault.copy()
+        try "---\n名前: 二重法\n種別: 法\n期間: [1, 現在]\n効力: [1, 2]\n---\n"
+            .write(to: vault.appendingPathComponent("法律/二重法.md"), atomically: true, encoding: .utf8)
+        let s = try await Indexer(vault: vault).rebuild()
+        #expect(s.nodes["法律/二重法.md"]?.flags == [.broken])
+        #expect(s.nodes.count == 67)
+        #expect(s.nodes.values.filter { $0.flags.contains(.broken) }.count == 1)
+        #expect(s.nodes["法律/鉄の掟.md"]?.flags.isEmpty == true)
+    }
+
     @Test func cyclicParentsDoNotHangRulers() async throws {
         let vault = try SampleVault.copy()
         // 同じ型の二つが互いを 親 に指す。front matter だけでは輪を防げない。

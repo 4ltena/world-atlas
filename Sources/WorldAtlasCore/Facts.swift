@@ -1,5 +1,15 @@
+/// 事実の出どころ。節点の識別子は保存名ではなく vault からの相対パスなので、
+/// 保存名が重複していても総観の行から一つの節点を開ける。
+public struct FactSource: Sendable {
+    public var path: String
+    public var node: Node
+    public init(path: String, node: Node) { self.path = path; self.node = node }
+}
+
 public struct Fact: Equatable, Sendable {
     public var year: Int
+    /// vault からの相対パス。識別子。
+    public var path: String
     /// 保存名。
     public var node: String
     /// その年の呼び名。
@@ -7,8 +17,9 @@ public struct Fact: Equatable, Sendable {
     public var category: String
     /// 動作や内容。点の出来事は空。
     public var text: String
-    public init(year: Int, node: String, display: String, category: String, text: String) {
-        self.year = year; self.node = node; self.display = display; self.category = category; self.text = text
+    public init(year: Int, path: String, node: String, display: String, category: String, text: String) {
+        self.year = year; self.path = path; self.node = node
+        self.display = display; self.category = category; self.text = text
     }
 }
 
@@ -31,16 +42,18 @@ public enum Facts {
 
     /// year の前後 window 年に起きたことを年順に集める。
     /// 出来事とは、点の節点、期間の始まりと終わり、別名の切り替わり、出来事の各行である。
-    public static func around(year: Int, window: Int, nodes: [Node]) -> [Fact] {
+    public static func around(year: Int, window: Int, sources: [FactSource]) -> [Fact] {
         let lo = year - window, hi = year + window
         func within(_ y: Int) -> Bool { lo <= y && y <= hi }
         var out: [Fact] = []
         var isPoint: [Bool] = []
         func add(_ f: Fact, point: Bool = false) { out.append(f); isPoint.append(point) }
-        for n in nodes {
+        for src in sources {
+            let n = src.node
             let v = verbs(for: n.category)
             func fact(_ y: Int, _ text: String, display: String? = nil) -> Fact {
-                Fact(year: y, node: n.name, display: display ?? n.displayName(at: y), category: n.category, text: text)
+                Fact(year: y, path: src.path, node: n.name, display: display ?? n.displayName(at: y),
+                     category: n.category, text: text)
             }
             if n.isPoint {
                 if within(n.from) { add(fact(n.from, ""), point: true) }
@@ -55,7 +68,7 @@ public enum Facts {
                 add(fact(m.year, m.label))
             }
         }
-        // 年順。同年は点の出来事を先に、あとは nodes の並びを保つ。
+        // 年順。同年は点の出来事を先に、あとは sources の並びを保つ。
         return out.enumerated().sorted { a, b in
             if a.element.year != b.element.year { return a.element.year < b.element.year }
             if isPoint[a.offset] != isPoint[b.offset] { return isPoint[a.offset] }

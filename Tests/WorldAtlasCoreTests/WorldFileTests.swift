@@ -26,6 +26,22 @@ import Testing
         #expect(again == w)
     }
 
+    /// 平文で書けない値を含む世界。引用せずに書き出すと読み直せないか値が変わる。
+    @Test func renderQuotesUnsafeScalars() throws {
+        let w = World(
+            name: "海: 北",
+            baseCalendar: "帝国 #1",
+            calendars: [
+                CalendarDef(name: "帝国 #1", offset: 0),
+                CalendarDef(name: "\"引用\"", offset: 12),
+                CalendarDef(name: " 前後 ", offset: -3),
+                CalendarDef(name: "一覧, [と]", offset: 7),
+            ],
+            current: 500
+        )
+        #expect(try WorldFile.parse(WorldFile.render(w)) == w)
+    }
+
     @Test func formatsYears() {
         #expect(CalendarDef(name: "帝国暦", offset: 0).format(500) == "帝国暦 500 年")
         #expect(CalendarDef(name: "海都暦", offset: 178).format(500) == "海都暦 678 年")

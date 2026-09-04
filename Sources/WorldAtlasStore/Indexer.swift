@@ -71,8 +71,11 @@ public actor Indexer {
         return snapshot
     }
 
+    /// 節点の本文。UTF-8 で読めないファイルはここで throw する（段 4 が扱い方を決める）。
+    /// 壊れた節点は原文だけが直す手がかりなので、front matter を落とさず全文を返す（設計書 4.4）。
     public func body(of path: String) throws -> String {
         let text = try String(contentsOf: fileURL(of: path), encoding: .utf8)
+        if snapshot.nodes[path]?.flags.contains(.broken) == true { return text }
         return FrontMatter.split(text)?.body ?? text
     }
 

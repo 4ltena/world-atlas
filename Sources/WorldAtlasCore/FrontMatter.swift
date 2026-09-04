@@ -53,6 +53,10 @@ extension FrontMatter {
         var node = Node(name: name, kind: kind, category: category, from: 0, to: nil)
         node.body = split.body
 
+        // 効力 は 期間 の言い換えなので、両方あると意味が決まらない。黙って片方を採らない。
+        guard dict["期間"] == nil || dict["効力"] == nil else {
+            throw FrontMatterError(line: nil, message: "期間 と 効力 は同じ意味です。どちらか一方だけ書きます")
+        }
         if let y = dict["年"] {
             guard let year = y as? Int else {
                 throw FrontMatterError(line: nil, message: "年 の値は整数で書きます")

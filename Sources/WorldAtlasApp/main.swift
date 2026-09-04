@@ -3,6 +3,9 @@ import Foundation
 import WorldAtlasCore
 import WorldAtlasStore
 
+// 端末以外へ繋いだときも行ごとに流す。--watch の出力をファイルやパイプで見るため。
+setvbuf(stdout, nil, _IOLBF, 0)
+
 func printErr(_ s: String) {
     FileHandle.standardError.write((s + "\n").data(using: .utf8)!)
 }

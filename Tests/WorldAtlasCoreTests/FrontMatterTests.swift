@@ -77,6 +77,12 @@ import Testing
         #expect(n.to == nil)
     }
 
+    @Test func periodAndEffectTogetherIsAnError() {
+        #expect(throws: FrontMatterError(line: nil, message: "期間 と 効力 は同じ意味です。どちらか一方だけ書きます")) {
+            try FrontMatter.parse("---\n名前: 鉄の掟\n種別: 法\n期間: [590, 現在]\n効力: [412, 596]\n---\n", kind: .law)
+        }
+    }
+
     @Test func finiteEnd() throws {
         let n = try FrontMatter.parse("---\n名前: 鉄鎚亭\n種別: 宿\n期間: [322, 588]\n---\n", kind: .place)
         #expect(n.to == 588)

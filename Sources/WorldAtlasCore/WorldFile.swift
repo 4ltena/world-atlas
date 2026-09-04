@@ -61,9 +61,34 @@ public enum WorldFile {
 
     /// 人が読める並びで書き出す。Yams の dump は鍵の順を保たないので手で組む。
     public static func render(_ w: World) -> String {
-        var s = "名前: \(w.name)\n基準暦: \(w.baseCalendar)\n暦:\n"
-        for c in w.calendars { s += "  - [\(c.name), \(c.offset)]\n" }
+        var s = "名前: \(scalar(w.name))\n基準暦: \(scalar(w.baseCalendar))\n暦:\n"
+        for c in w.calendars { s += "  - [\(scalar(c.name, flow: true)), \(c.offset)]\n" }
         s += "現在: \(w.current)\n"
         return s
+    }
+
+    /// 値を YAML の一行の形にする。平文で書けるかどうかの判断は Yams に任せ、書けない値は
+    /// Yams に引用させる。flow が真なら `[ ]` の中に置く値で、そこでは `, [ ] { }` も区切りに
+    /// なるが Yams は block の文脈で見るので、その分だけこちらで引用に落とす。
+    private static func scalar(_ s: String, flow: Bool = false) -> String {
+        guard let d = try? Yams.dump(object: s, allowUnicode: true).trimmingCharacters(in: .newlines),
+              !d.contains("\n") else { return quoted(s) }
+        let isPlain = d.first != "'" && d.first != "\""
+        if flow, isPlain, d.contains(where: { ",[]{}".contains($0) }) { return quoted(s) }
+        return d
+    }
+
+    /// どの文脈でも一行に収まる二重引用符の形。複数行になる値と dump の失敗はここへ落とす。
+    private static func quoted(_ s: String) -> String {
+        var e = ""
+        for c in s {
+            switch c {
+            case "\\": e += "\\\\"
+            case "\"": e += "\\\""
+            case "\n": e += "\\n"
+            default: e.append(c)
+            }
+        }
+        return "\"\(e)\""
     }
 }
