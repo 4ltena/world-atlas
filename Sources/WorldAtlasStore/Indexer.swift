@@ -90,7 +90,7 @@ public actor Indexer {
         let w = VaultWatcher(vault: vault) { [weak self] urls in
             guard let self else { return }
             Task {
-                if let s = try? await self.reindexIfCurrent(urls, generation: generation) { onUpdate(s) }
+                await self.reindexAndNotifyIfCurrent(urls, generation: generation, onUpdate: onUpdate)
             }
         }
         try w.start()
@@ -102,11 +102,13 @@ public actor Indexer {
         watcher = nil
     }
 
-    /// generation が今の世代と合い、まだ監視中の時だけ reindex する。停止後や
-    /// 再開後に、以前の watcher が積んだ Task が actor へ戻ってきても無視するための番人。
-    private func reindexIfCurrent(_ files: [URL], generation: Int) throws -> Snapshot? {
-        guard watcher != nil, generation == watchGeneration else { return nil }
-        return try reindex(files)
+    /// generation が今の世代と合い、まだ監視中の時だけ reindex し、そのまま同じ隔離区間の
+    /// 中で onUpdate を呼ぶ。確認（世代・監視中か）から通知までを分けずに actor の中で
+    /// 続けて行うことで、その間に stopWatching が割り込んで古い通知が漏れることを防ぐ。
+    private func reindexAndNotifyIfCurrent(_ files: [URL], generation: Int, onUpdate: @Sendable (Snapshot) -> Void) {
+        guard watcher != nil, generation == watchGeneration else { return }
+        guard let s = try? reindex(files) else { return }
+        onUpdate(s)
     }
 
     // MARK: 内部

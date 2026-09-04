@@ -64,6 +64,25 @@ import WorldAtlasCore
         #expect(s.nodes["場所/川向こう.md"] == nil)
         #expect(s.backrefs["場所/川向こう.md"] == nil)
     }
+
+    // I2: 確認（世代・監視中か）から onUpdate の呼び出しまでを、いまは
+    // reindexAndNotifyIfCurrent という一つの隔離区間の中で続けて行っている（途中に await が
+    // 無い）ため、stopWatching() がその区間の途中に割り込むことはできない。ここでは、書き換え
+    // 直後、FSEvents の latency（既定 0.3 秒）が明けて通知が届くより先に stopWatching() を
+    // 呼び、十分待っても onUpdate が一度も呼ばれないことを確かめる。
+    @Test func stopWatchingSuppressesLateUpdates() async throws {
+        let vault = try SampleVault.copy()
+        let indexer = try Indexer(vault: vault)
+        _ = try await indexer.rebuild()
+        let calls = Box<Int>(0)
+        try await indexer.startWatching { _ in calls.update { $0 += 1 } }
+        try await Task.sleep(for: .milliseconds(500))
+        let file = vault.appendingPathComponent("場所/川向こう.md")
+        try (try String(contentsOf: file, encoding: .utf8) + "\n追記\n").write(to: file, atomically: true, encoding: .utf8)
+        await indexer.stopWatching()
+        try await Task.sleep(for: .seconds(2))
+        #expect(calls.value == 0)
+    }
 }
 
 @Suite struct VaultWatcherPathClassificationTests {
