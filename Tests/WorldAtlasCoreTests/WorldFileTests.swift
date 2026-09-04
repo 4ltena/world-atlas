@@ -36,6 +36,8 @@ import Testing
                 CalendarDef(name: "\"引用\"", offset: 12),
                 CalendarDef(name: " 前後 ", offset: -3),
                 CalendarDef(name: "一覧, [と]", offset: 7),
+                CalendarDef(name: "?暦", offset: 1),
+                CalendarDef(name: ":暦", offset: 2),
             ],
             current: 500
         )
