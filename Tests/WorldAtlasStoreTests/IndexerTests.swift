@@ -167,6 +167,22 @@ import WorldAtlasCore
         #expect(s.children[root]?.contains(child) == true)
     }
 
+    /// 索引を通さず Snapshot を手で組む。buildSnapshot の輪の検出を経ないので、
+    /// rulers 自身の訪問済み集合だけが停止を守る。番人を外すとここが通らなくなる。
+    @Test(.timeLimit(.minutes(1)))
+    func rulersTerminatesOnACycleInAHandBuiltSnapshot() async throws {
+        func node(_ path: String, parentPath: String) -> IndexedNode {
+            IndexedNode(path: path, name: path, kind: .place, category: "区", from: 1, to: nil,
+                        isPoint: false, parent: nil, parentPath: parentPath, aliases: [],
+                        rules: [], lineages: [], marks: [], flags: [])
+        }
+        var s = Snapshot.empty
+        // 互いを親に指す二つ。どちらにも支配が無いので、走査は輪を回り続けようとする。
+        s.nodes = ["甲": node("甲", parentPath: "乙"), "乙": node("乙", parentPath: "甲")]
+        #expect(s.rulers(of: "甲", at: 500).isEmpty)
+        #expect(s.rulers(of: "乙", at: 500).isEmpty)
+    }
+
     @Test func invalidUTF8MarkdownIsFlaggedNotFatal() async throws {
         let vault = try SampleVault.copy()
         // Shift_JIS の あい。0x82 は UTF-8 の先頭に来ないので読めない。
