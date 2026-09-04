@@ -65,12 +65,16 @@ import WorldAtlasCore
         #expect(s.backrefs["場所/川向こう.md"] == nil)
     }
 
-    // I2: 確認（世代・監視中か）から onUpdate の呼び出しまでを、いまは
-    // reindexAndNotifyIfCurrent という一つの隔離区間の中で続けて行っている（途中に await が
-    // 無い）ため、stopWatching() がその区間の途中に割り込むことはできない。ここでは、書き換え
-    // 直後、FSEvents の latency（既定 0.3 秒）が明けて通知が届くより先に stopWatching() を
-    // 呼び、十分待っても onUpdate が一度も呼ばれないことを確かめる。
-    @Test func stopWatchingSuppressesLateUpdates() async throws {
+    // このテストが検査しているのは、通常の流れで停止したあとに更新が来ないことである。
+    // 確認（世代・監視中か）と onUpdate の呼び出しのあいだの競合は、このテストでは
+    // 突けていない。停止（stopWatching）が FSEvents の latency（既定 0.3 秒）よりも
+    // 先に確実に完了するため、確認が実行される時点ではすでに watcher == nil になっており、
+    // 確認と通知の間に人為的に隙間（300ms の遅延）を作り直しても、このテストは通ったまま
+    // だった（旧来の分離した形へ一時的に戻して実測済み。詳細は報告書）。
+    // その競合が実際に守られている根拠は、このテストではなく、reindexAndNotifyIfCurrent の
+    // 中に中断点（await）が一つも無いこと（Swift の actor 隔離により、その関数は一度始まれば
+    // stopWatching を含む他の呼び出しに割り込まれずに完了する）にある。
+    @Test func stopWatchingStopsFurtherUpdates() async throws {
         let vault = try SampleVault.copy()
         let indexer = try Indexer(vault: vault)
         _ = try await indexer.rebuild()
