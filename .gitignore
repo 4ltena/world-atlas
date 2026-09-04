@@ -1,1 +1,6 @@
 docs/superpowers/
+.build/
+.swiftpm/
+*.xcodeproj
+.atlas/
+build/
