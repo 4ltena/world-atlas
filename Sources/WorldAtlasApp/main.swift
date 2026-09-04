@@ -1,4 +1,4 @@
-// 段 2 で SwiftUI の App に置き換える。この段では vault を走査して数を出すだけ。
+// Stage 2 で SwiftUI の App に置き換える。この段では vault を走査して数を出すだけ。
 import Foundation
 import WorldAtlasCore
 import WorldAtlasStore

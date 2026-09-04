@@ -82,7 +82,7 @@ public enum Facts {
         return f.text.isEmpty ? head : head + " " + f.text
     }
 
-    /// 段 6 が Ollama に渡す文字列。この形は段 6 でも変えない。
+    /// Stage 6 が Ollama に渡す文字列。この形はStage 6 でも変えない。
     public static func overviewInput(year: Int, window: Int, facts: [Fact], calendar: CalendarDef) -> String {
         var s = "対象の年: \(calendar.format(year))\n"
         s += "範囲: \(calendar.format(year - window)) から \(calendar.format(year + window))\n\n"
