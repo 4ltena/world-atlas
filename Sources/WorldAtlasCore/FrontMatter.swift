@@ -57,6 +57,10 @@ extension FrontMatter {
         guard dict["期間"] == nil || dict["効力"] == nil else {
             throw FrontMatterError(line: nil, message: "期間 と 効力 は同じ意味です。どちらか一方だけ書きます")
         }
+        // 年 と 期間 も片方だけ。両方あると点の出来事か続くものかが決まらない。
+        if dict["年"] != nil, let other = ["期間", "効力"].first(where: { dict[$0] != nil }) {
+            throw FrontMatterError(line: nil, message: "年 と \(other) は同時に書けません。どちらか一方だけ書きます")
+        }
         if let y = dict["年"] {
             guard let year = y as? Int else {
                 throw FrontMatterError(line: nil, message: "年 の値は整数で書きます")

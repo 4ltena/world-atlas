@@ -83,6 +83,12 @@ import Testing
         }
     }
 
+    @Test func yearAndPeriodTogetherIsAnError() {
+        #expect(throws: FrontMatterError(line: nil, message: "年 と 期間 は同時に書けません。どちらか一方だけ書きます")) {
+            try FrontMatter.parse("---\n名前: 職人街の大火\n種別: 出来事\n年: 588\n期間: [588, 589]\n---\n", kind: .event)
+        }
+    }
+
     @Test func finiteEnd() throws {
         let n = try FrontMatter.parse("---\n名前: 鉄鎚亭\n種別: 宿\n期間: [322, 588]\n---\n", kind: .place)
         #expect(n.to == 588)
