@@ -21,11 +21,8 @@ public actor Indexer {
 
     /// 全走査。索引を空にしてから入れ直す。
     public func rebuild() throws -> Snapshot {
-        try queue.write { db in
-            for t in ["node", "alias", "mark", "rule", "lineage", "ref", "calendar"] {
-                try db.execute(sql: "DELETE FROM \(t)")
-            }
-        }
+        // 消す前に読む。世界.yaml が壊れているときに索引を空にして終わらないため。
+        let world = try readWorld()
         var ignored = 0
         var files: [URL] = []
         let entries = try FileManager.default.contentsOfDirectory(at: vault, includingPropertiesForKeys: [.isDirectoryKey])
@@ -33,10 +30,16 @@ public actor Indexer {
             guard (try? e.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
             if e.lastPathComponent.hasPrefix(".") { continue }
             guard Kind(rawValue: e.lastPathComponent) != nil else { ignored += 1; continue }
-            let inner = try FileManager.default.contentsOfDirectory(at: e, includingPropertiesForKeys: nil)
-            files += inner.filter { $0.pathExtension == "md" }
+            // 型のディレクトリの下は再帰で辿る。入れ子は木の親子を表さないが、置かれた
+            // ファイルを落とす理由も無い。. で始まるものは飛ばす。
+            let inner = FileManager.default.enumerator(at: e, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
+            files += (inner?.compactMap { $0 as? URL } ?? []).filter { $0.pathExtension == "md" }
         }
-        let world = try readWorld()
+        try queue.write { db in
+            for t in ["node", "alias", "mark", "rule", "lineage", "ref", "calendar"] {
+                try db.execute(sql: "DELETE FROM \(t)")
+            }
+        }
         try writeCalendars(world)
         for f in files { try upsert(f) }
         snapshot = try buildSnapshot(world: world, ignored: ignored)
@@ -105,12 +108,12 @@ public actor Indexer {
         guard let kind = Kind(rawValue: kindDirectory(of: file)) else { return }
         let stem = file.deletingPathExtension().lastPathComponent
         let mtime = (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate?.timeIntervalSince1970) ?? 0
-        let text = try String(contentsOf: file, encoding: .utf8)
         try queue.write { db in
             try deleteRows(path: rel, db: db)
             let node: Node
             do {
-                node = try FrontMatter.parse(text, kind: kind)
+                // 読み込みもこの中で行う。UTF-8 で読めない一ファイルが走査全体を止めないため。
+                node = try FrontMatter.parse(String(contentsOf: file, encoding: .utf8), kind: kind)
             } catch {
                 try db.execute(sql: """
                     INSERT INTO node(path, name, kind, category, "from", "to", isPoint, parent, mtime, broken, mismatch)
@@ -204,6 +207,17 @@ public actor Indexer {
         for (path, n) in nodes {
             if let p = n.parent, let ps = savedNames[p], ps.count == 1, let parent = nodes[ps[0]], parent.kind == n.kind, ps[0] != path {
                 nodes[path]!.parentPath = ps[0]
+            }
+        }
+        // 親の輪を切る。輪の節点はどれも parentPath を持つので roots に入らず、互いの
+        // children にしか現れないため木から永久に見えなくなる。輪を閉じる一辺だけを
+        // nil にすると、その節点が根になり残りはその子として辿れる。印は付けない。
+        for start in nodes.keys {
+            var seen: Set<String> = [start]
+            var cur = start
+            while let next = nodes[cur]!.parentPath {
+                if !seen.insert(next).inserted { nodes[cur]!.parentPath = nil; break }
+                cur = next
             }
         }
         // 参照の解決。

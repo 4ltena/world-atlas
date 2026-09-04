@@ -76,9 +76,11 @@ public struct Snapshot: Sendable {
 
     /// year に path を支配している勢力。本人に支配が書かれていなければ親を遡る。
     /// 区間は [開始, 終了) で、終了が nil なら開区間。
+    /// 親が輪になっていても必ず終わるよう、辿った path を覚えておく。
     public func rulers(of path: String, at year: Int) -> [IndexedNode] {
+        var seen: Set<String> = []
         var cur = nodes[path]
-        while let n = cur {
+        while let n = cur, seen.insert(n.path).inserted {
             if !n.rules.isEmpty {
                 return n.rules
                     .filter { $0.from <= year && ($0.to.map { year < $0 } ?? true) }

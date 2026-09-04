@@ -149,6 +149,65 @@ import WorldAtlasCore
         #expect(body.hasPrefix("[[職人街]]ができた四年後"))
     }
 
+    @Test func cyclicParentsDoNotHangRulers() async throws {
+        let vault = try SampleVault.copy()
+        // 同じ型の二つが互いを 親 に指す。front matter だけでは輪を防げない。
+        try "---\n名前: 甲\n種別: 区\n期間: [1, 現在]\n親: 乙\n---\n".write(to: vault.appendingPathComponent("場所/甲.md"), atomically: true, encoding: .utf8)
+        try "---\n名前: 乙\n種別: 区\n期間: [1, 現在]\n親: 甲\n---\n".write(to: vault.appendingPathComponent("場所/乙.md"), atomically: true, encoding: .utf8)
+        let s = try await Indexer(vault: vault).rebuild()
+        // 走査が必ず戻る。輪のままならここで止まる。
+        #expect(s.rulers(of: "場所/甲.md", at: 500).isEmpty)
+        #expect(s.rulers(of: "場所/乙.md", at: 500).isEmpty)
+        // 輪を閉じる一辺だけを切るので、片方が根になり、もう片方はその子として木から見える。
+        // どちらが切られるかは辞書の順に依るので、名前を決め打ちしない。
+        let places = Set(s.roots[.place] ?? [])
+        #expect(places.intersection(["場所/甲.md", "場所/乙.md"]).count == 1)
+        let root = places.contains("場所/甲.md") ? "場所/甲.md" : "場所/乙.md"
+        let child = root == "場所/甲.md" ? "場所/乙.md" : "場所/甲.md"
+        #expect(s.children[root]?.contains(child) == true)
+    }
+
+    @Test func invalidUTF8MarkdownIsFlaggedNotFatal() async throws {
+        let vault = try SampleVault.copy()
+        // Shift_JIS の あい。0x82 は UTF-8 の先頭に来ないので読めない。
+        try Data([0x82, 0xA0, 0x82, 0xA2]).write(to: vault.appendingPathComponent("場所/不正.md"))
+        let s = try await Indexer(vault: vault).rebuild()
+        #expect(s.nodes["場所/不正.md"]?.flags == [.broken])
+        // 一ファイルの符号化違反で走査が止まらない。見本の 66 件がすべて載る。
+        #expect(s.nodes.count == 67)
+        #expect(s.nodes["場所/職人街.md"]?.flags.isEmpty == true)
+        #expect(s.world.name == "灰海")
+    }
+
+    @Test func nestedMarkdownIsIndexed() async throws {
+        let vault = try SampleVault.copy()
+        let dir = vault.appendingPathComponent("場所/下位")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try "---\n名前: 谷戸\n種別: 区\n期間: [1, 現在]\n---\n".write(to: dir.appendingPathComponent("谷戸.md"), atomically: true, encoding: .utf8)
+        let s = try await Indexer(vault: vault).rebuild()
+        // path は型のディレクトリからの相対で、入れ子の区間を保つ。
+        #expect(s.nodes["場所/下位/谷戸.md"]?.name == "谷戸")
+        #expect(s.nodes["場所/下位/谷戸.md"]?.kind == .place)
+        #expect(s.nodes["場所/下位/谷戸.md"]?.flags.isEmpty == true)
+        #expect(s.nodes.count == 67)
+        #expect(s.ignoredDirectories == 0)
+    }
+
+    @Test func reindexUpdatesDuplicateFlagsOnOtherFiles() async throws {
+        let vault = try SampleVault.copy()
+        let extra = vault.appendingPathComponent("アイテム/石橋.md")
+        try "---\n名前: 石橋\n種別: 橋\n期間: [1, 現在]\n---\n".write(to: extra, atomically: true, encoding: .utf8)
+        let indexer = try Indexer(vault: vault)
+        let s1 = try await indexer.rebuild()
+        #expect(s1.nodes["場所/石橋.md"]?.flags == [.duplicate])
+        // 片方を消して、消えた側だけを再索引する。残った側の印が外れる。
+        try FileManager.default.removeItem(at: extra)
+        let s2 = try await indexer.reindex([extra])
+        #expect(s2.nodes["アイテム/石橋.md"] == nil)
+        #expect(s2.nodes["場所/石橋.md"]?.flags.isEmpty == true)
+        #expect(s2.path(ofName: "石橋") == "場所/石橋.md")
+    }
+
     @Test func unknownDirectoriesAreCounted() async throws {
         let vault = try SampleVault.copy()
         try FileManager.default.createDirectory(at: vault.appendingPathComponent("下書き"), withIntermediateDirectories: true)
