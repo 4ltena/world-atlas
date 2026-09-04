@@ -11,6 +11,7 @@ public actor Indexer {
     public let vault: URL
     private let queue: DatabaseQueue
     public private(set) var snapshot: Snapshot = .empty
+    private var watcher: VaultWatcher?
 
     public init(vault: URL) throws {
         self.vault = vault
@@ -74,6 +75,26 @@ public actor Indexer {
 
     public func fileURL(of path: String) -> URL {
         vault.appendingPathComponent(path)
+    }
+
+    // MARK: 監視
+
+    /// vault を見張り、変わったファイルを索引し直して onUpdate に新しい snapshot を渡す。
+    public func startWatching(onUpdate: @escaping @Sendable (Snapshot) -> Void) throws {
+        guard watcher == nil else { return }
+        let w = VaultWatcher(vault: vault) { [weak self] urls in
+            guard let self else { return }
+            Task {
+                if let s = try? await self.reindex(urls) { onUpdate(s) }
+            }
+        }
+        try w.start()
+        watcher = w
+    }
+
+    public func stopWatching() {
+        watcher?.stop()
+        watcher = nil
     }
 
     // MARK: 内部
