@@ -2,8 +2,8 @@ import Testing
 @testable import WorldAtlasCore
 
 @Suite struct ExtentTests {
-    func node(_ name: String, _ from: Int, _ to: Int?, marks: [Mark] = [], point: Bool = false) -> Node {
-        Node(name: name, kind: .place, category: "x", from: from, to: to, isPoint: point, marks: marks)
+    func node(_ name: String, _ from: Int, _ to: Int?, marks: [Mark] = [], point: Bool = false, aliases: [Alias] = []) -> Node {
+        Node(name: name, kind: .place, category: "x", from: from, to: to, isPoint: point, aliases: aliases, marks: marks)
     }
 
     @Test func loIsEarliestStartAndHiIsLatestOfEndsMarksAndCurrent() {
@@ -26,5 +26,12 @@ import Testing
 
     @Test func hiIsAtLeastLoPlusOne() {
         #expect(Extent.compute(nodes: [node("a", 5, 5, point: true)], current: 5) == Extent(lo: 5, hi: 6))
+    }
+
+    @Test func aliasYearExtendsHi() {
+        let ex = Extent.compute(nodes: [
+            node("a", 100, 200, aliases: [Alias(from: 300, name: "旧名")]),
+        ], current: 100)
+        #expect(ex == Extent(lo: 100, hi: 300))
     }
 }

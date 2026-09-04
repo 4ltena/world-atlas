@@ -39,4 +39,40 @@ import Testing
             try WorldFile.parse("名前: x\n基準暦: 王暦\n暦:\n  - [帝国暦, 0]\n現在: 1\n")
         }
     }
+
+    @Test func topLevelMustBeAMapping() {
+        #expect(throws: FrontMatterError(line: nil, message: "世界.yaml は 鍵: 値 の並びで書きます")) {
+            try WorldFile.parse("- a\n- b\n")
+        }
+    }
+
+    @Test func nameIsRequired() {
+        #expect(throws: FrontMatterError(line: nil, message: "名前 がありません")) {
+            try WorldFile.parse("基準暦: 帝国暦\n暦:\n  - [帝国暦, 0]\n現在: 1\n")
+        }
+    }
+
+    @Test func baseCalendarKeyIsRequired() {
+        #expect(throws: FrontMatterError(line: nil, message: "基準暦 がありません")) {
+            try WorldFile.parse("名前: x\n暦:\n  - [帝国暦, 0]\n現在: 1\n")
+        }
+    }
+
+    @Test func calendarListMustBePresentAndNonEmpty() {
+        #expect(throws: FrontMatterError(line: nil, message: "暦 は - [名前, 加算する数] の並びで書きます")) {
+            try WorldFile.parse("名前: x\n基準暦: 帝国暦\n現在: 1\n")
+        }
+    }
+
+    @Test func calendarRowMustBeNameAndOffset() {
+        #expect(throws: FrontMatterError(line: nil, message: "暦 の各行は [名前, 加算する数] で書きます")) {
+            try WorldFile.parse("名前: x\n基準暦: 帝国暦\n暦:\n  - [帝国暦]\n現在: 1\n")
+        }
+    }
+
+    @Test func currentMustBeAnInteger() {
+        #expect(throws: FrontMatterError(line: nil, message: "現在 は整数で書きます")) {
+            try WorldFile.parse("名前: x\n基準暦: 帝国暦\n暦:\n  - [帝国暦, 0]\n現在: abc\n")
+        }
+    }
 }
