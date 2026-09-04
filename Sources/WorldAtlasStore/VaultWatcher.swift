@@ -5,12 +5,10 @@ import CoreServices
 public final class VaultWatcher: @unchecked Sendable {
     private let vault: URL
     /// シンボリックリンク解決済みの vault パス。Foundation の resolvingSymlinksInPath は
-    /// /var 等を互換のためわざと解決しないので、realpath(3) を直に使う。FSEvents は、監視の
-    /// 根に渡した文字列そのものと一致する時だけそれを素通しで返し、それ以外はカーネルの
-    /// 実体パス（/private/var/… 等）で返す。根に解決済みパスを渡しておけば、この二通りが
-    /// 揃う。
+    /// /var 等を互換のためわざと解決しないので、realpath(3) を直に使う。FSEvents に渡す
+    /// 監視の根と、届くイベントのパスをこれで揃える。判定にのみ使い、onChange へ渡す URL の
+    /// 組み立てには使わない（下記 mapToVaultNamespace を参照）。
     private let resolvedVault: String
-    private let atlasPath: String
     private let latency: TimeInterval
     private let onChange: @Sendable ([URL]) -> Void
     private let queue = DispatchQueue(label: "world-atlas.watcher")
@@ -19,7 +17,6 @@ public final class VaultWatcher: @unchecked Sendable {
     public init(vault: URL, latency: TimeInterval = 0.3, onChange: @escaping @Sendable ([URL]) -> Void) {
         self.vault = vault
         self.resolvedVault = VaultWatcher.realPath(vault)
-        self.atlasPath = resolvedVault + "/.atlas"
         self.latency = latency
         self.onChange = onChange
     }
@@ -32,6 +29,22 @@ public final class VaultWatcher: @unchecked Sendable {
         }
     }
 
+    /// FSEvents が返した実体パス一本を判定する。.atlas そのものとその下、vault の根そのもの
+    /// （ディレクトリ作成直後などに親の mtime が動いて届くことがある）は対象外として nil を
+    /// 返す。対象なら、実体パスの vault 部分を元の vault（呼び出し側が渡した、まだ解決して
+    /// いない URL）に差し替えて返す。実体パスをそのまま onChange へ渡すと、Indexer 側の
+    /// vault.standardizedFileURL との比較が「そのパスが今も存在するか」で結果の変わる
+    /// Foundation の挙動に左右されてしまう（存在しない＝消えたファイルの時だけ食い違う）ため、
+    /// ここで vault の名前空間に一度戻しておく。存在するかどうかはこの関数では見ない。
+    static func mapToVaultNamespace(resolvedVault: String, vault: URL, rawPath: String) -> URL? {
+        guard rawPath != resolvedVault else { return nil }
+        let atlas = resolvedVault + "/.atlas"
+        guard rawPath != atlas, !rawPath.hasPrefix(atlas + "/") else { return nil }
+        guard rawPath.hasPrefix(resolvedVault + "/") else { return nil }
+        let remainder = String(rawPath.dropFirst(resolvedVault.count + 1))
+        return vault.appendingPathComponent(remainder)
+    }
+
     public func start() throws {
         guard stream == nil else { return }
         var context = FSEventStreamContext(version: 0, info: Unmanaged.passUnretained(self).toOpaque(), retain: nil, release: nil, copyDescription: nil)
@@ -41,7 +54,11 @@ public final class VaultWatcher: @unchecked Sendable {
             throw IndexerError(message: "監視を始められない: \(vault.path)")
         }
         FSEventStreamSetDispatchQueue(s, queue)
-        FSEventStreamStart(s)
+        guard FSEventStreamStart(s) else {
+            FSEventStreamInvalidate(s)
+            FSEventStreamRelease(s)
+            throw IndexerError(message: "監視を開始できない: \(vault.path)")
+        }
         stream = s
     }
 
@@ -59,17 +76,7 @@ public final class VaultWatcher: @unchecked Sendable {
         guard let info else { return }
         let me = Unmanaged<VaultWatcher>.fromOpaque(info).takeUnretainedValue()
         guard let paths = unsafeBitCast(eventPaths, to: NSArray.self) as? [String] else { return }
-        // FSEvents が返す文字列そのものが、すでにカーネルの実体パスであり正準な形。ここへ
-        // URL.standardizedFileURL を重ねると、存在するパスだけ /private が剥がれて存在しない
-        // パス（rename 前の一時ファイル等）は剥がれず、比較の左右がずれる。そのため素の文字列
-        // のまま .atlas と比べる。
-        let atlas = me.atlasPath
-        // ディレクトリの中に初めて何かができた直後、FSEvents は個々のファイルに加えて
-        // vault の根そのものも「変わった」と報告することがある（親ディレクトリの mtime が
-        // 動くため）。根そのものはファイルではなく、報告すべき対象を持たないので落とす。
-        let urls = paths
-            .filter { $0 != atlas && !$0.hasPrefix(atlas + "/") && $0 != me.resolvedVault }
-            .map { URL(fileURLWithPath: $0) }
+        let urls = paths.compactMap { VaultWatcher.mapToVaultNamespace(resolvedVault: me.resolvedVault, vault: me.vault, rawPath: $0) }
         let unique = Array(Set(urls)).sorted { $0.path < $1.path }
         if !unique.isEmpty { me.onChange(unique) }
     }

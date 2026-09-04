@@ -12,6 +12,9 @@ public actor Indexer {
     private let queue: DatabaseQueue
     public private(set) var snapshot: Snapshot = .empty
     private var watcher: VaultWatcher?
+    // startWatching のたびに増やす。停止・再開のまたぎで、以前の watcher が積んだ
+    // Task が actor へ戻ってきても、この世代がずれていれば古い呼び出しとして捨てる。
+    private var watchGeneration = 0
 
     public init(vault: URL) throws {
         self.vault = vault
@@ -82,10 +85,12 @@ public actor Indexer {
     /// vault を見張り、変わったファイルを索引し直して onUpdate に新しい snapshot を渡す。
     public func startWatching(onUpdate: @escaping @Sendable (Snapshot) -> Void) throws {
         guard watcher == nil else { return }
+        watchGeneration += 1
+        let generation = watchGeneration
         let w = VaultWatcher(vault: vault) { [weak self] urls in
             guard let self else { return }
             Task {
-                if let s = try? await self.reindex(urls) { onUpdate(s) }
+                if let s = try? await self.reindexIfCurrent(urls, generation: generation) { onUpdate(s) }
             }
         }
         try w.start()
@@ -95,6 +100,13 @@ public actor Indexer {
     public func stopWatching() {
         watcher?.stop()
         watcher = nil
+    }
+
+    /// generation が今の世代と合い、まだ監視中の時だけ reindex する。停止後や
+    /// 再開後に、以前の watcher が積んだ Task が actor へ戻ってきても無視するための番人。
+    private func reindexIfCurrent(_ files: [URL], generation: Int) throws -> Snapshot? {
+        guard watcher != nil, generation == watchGeneration else { return nil }
+        return try reindex(files)
     }
 
     // MARK: 内部

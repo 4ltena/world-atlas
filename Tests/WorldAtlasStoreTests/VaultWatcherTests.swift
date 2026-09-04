@@ -42,6 +42,48 @@ import WorldAtlasCore
         try await waitUntil(timeout: 5) { latest.value?.refs["場所/川向こう.md"] == ["場所/石橋.md"] }
         await indexer.stopWatching()
     }
+
+    // C1: 消したファイルの実体パスは、消えた時点で標準化しても /private が剥がれないため、
+    // vault の名前空間へ戻さずに reindex へ渡すと相対化がずれて削除が索引に反映されない。
+    // ここは削除と、それを指していた refs/backrefs の消滅を、監視の経路そのもので確かめる。
+    @Test func deletionReachesTheSnapshotThroughTheWatcher() async throws {
+        let vault = try SampleVault.copy()
+        let indexer = try Indexer(vault: vault)
+        _ = try await indexer.rebuild()
+        let latest = Box<Snapshot?>(nil)
+        try await indexer.startWatching { s in latest.update { $0 = s } }
+        try await Task.sleep(for: .milliseconds(500))
+        let file = vault.appendingPathComponent("場所/川向こう.md")
+        try FileManager.default.removeItem(at: file)
+        try await waitUntil(timeout: 5) {
+            guard let s = latest.value else { return false }
+            return s.nodes["場所/川向こう.md"] == nil && s.refs["場所/エルデン邑.md"]?.contains("場所/川向こう.md") != true
+        }
+        await indexer.stopWatching()
+        let s = try #require(latest.value)
+        #expect(s.nodes["場所/川向こう.md"] == nil)
+        #expect(s.backrefs["場所/川向こう.md"] == nil)
+    }
+}
+
+@Suite struct VaultWatcherPathClassificationTests {
+    // M1: FSEvents に何も投げず、判定だけを純粋な関数として決定的に検査する。存在するかどうか
+    // を一切見ないことが要点で、最後のケース（消えたファイルのパス）が C1 の再発を止める。
+    @Test func mapsRawPathsToTheOriginalVaultNamespace() {
+        let vault = URL(fileURLWithPath: "/var/folders/xx/T/haikai-test")
+        let resolved = "/private/var/folders/xx/T/haikai-test"
+        func classify(_ raw: String) -> URL? {
+            VaultWatcher.mapToVaultNamespace(resolvedVault: resolved, vault: vault, rawPath: raw)
+        }
+        #expect(classify(resolved + "/.atlas") == nil)
+        #expect(classify(resolved + "/.atlas/state.json") == nil)
+        #expect(classify(resolved) == nil)
+        #expect(classify(resolved + "/世界.yaml") == vault.appendingPathComponent("世界.yaml"))
+        #expect(classify(resolved + "/場所/川向こう.md") == vault.appendingPathComponent("場所/川向こう.md"))
+        // 消えたファイルのパス。ディスク上に存在しなくても、実装は存在チェックをしないので
+        // 他の通常ファイルと同じく vault の名前空間へ戻る。
+        #expect(classify(resolved + "/場所/消えた.md") == vault.appendingPathComponent("場所/消えた.md"))
+    }
 }
 
 final class Box<T>: @unchecked Sendable {
