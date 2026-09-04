@@ -1,0 +1,234 @@
+import Foundation
+import GRDB
+import WorldAtlasCore
+
+public struct IndexerError: Error, Sendable {
+    public var message: String
+}
+
+/// vault を走査して索引を作り、snapshot を出す。DB の接続はここにだけある。
+public actor Indexer {
+    public let vault: URL
+    private let queue: DatabaseQueue
+    public private(set) var snapshot: Snapshot = .empty
+
+    public init(vault: URL) throws {
+        self.vault = vault
+        self.queue = try IndexDatabase.open(vault: vault)
+    }
+
+    // MARK: 走査
+
+    /// 全走査。索引を空にしてから入れ直す。
+    public func rebuild() throws -> Snapshot {
+        try queue.write { db in
+            for t in ["node", "alias", "mark", "rule", "lineage", "ref", "calendar"] {
+                try db.execute(sql: "DELETE FROM \(t)")
+            }
+        }
+        var ignored = 0
+        var files: [URL] = []
+        let entries = try FileManager.default.contentsOfDirectory(at: vault, includingPropertiesForKeys: [.isDirectoryKey])
+        for e in entries {
+            guard (try? e.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+            if e.lastPathComponent.hasPrefix(".") { continue }
+            guard Kind(rawValue: e.lastPathComponent) != nil else { ignored += 1; continue }
+            let inner = try FileManager.default.contentsOfDirectory(at: e, includingPropertiesForKeys: nil)
+            files += inner.filter { $0.pathExtension == "md" }
+        }
+        let world = try readWorld()
+        try writeCalendars(world)
+        for f in files { try upsert(f) }
+        snapshot = try buildSnapshot(world: world, ignored: ignored)
+        return snapshot
+    }
+
+    /// 指定したファイルだけを索引し直す。消えていれば行を消す。世界.yaml なら暦を入れ直す。
+    public func reindex(_ files: [URL]) throws -> Snapshot {
+        var world = snapshot.world
+        for f in files {
+            if f.lastPathComponent == "世界.yaml" {
+                world = try readWorld()
+                try writeCalendars(world)
+                continue
+            }
+            guard f.pathExtension == "md", Kind(rawValue: kindDirectory(of: f)) != nil else { continue }
+            if FileManager.default.fileExists(atPath: f.path) {
+                try upsert(f)
+            } else {
+                let rel = relativePath(of: f)
+                try queue.write { db in try deleteRows(path: rel, db: db) }
+            }
+        }
+        snapshot = try buildSnapshot(world: world, ignored: snapshot.ignoredDirectories)
+        return snapshot
+    }
+
+    public func body(of path: String) throws -> String {
+        let text = try String(contentsOf: fileURL(of: path), encoding: .utf8)
+        return FrontMatter.split(text)?.body ?? text
+    }
+
+    public func fileURL(of path: String) -> URL {
+        vault.appendingPathComponent(path)
+    }
+
+    // MARK: 内部
+
+    private func readWorld() throws -> World {
+        let text = try String(contentsOf: vault.appendingPathComponent("世界.yaml"), encoding: .utf8)
+        return try WorldFile.parse(text)
+    }
+
+    private func writeCalendars(_ world: World) throws {
+        try queue.write { db in
+            try db.execute(sql: "DELETE FROM calendar")
+            for c in world.calendars {
+                try db.execute(sql: "INSERT INTO calendar(name, offset) VALUES (?, ?)", arguments: [c.name, c.offset])
+            }
+        }
+    }
+
+    private func relativePath(of url: URL) -> String {
+        let base = vault.standardizedFileURL.path
+        let p = url.standardizedFileURL.path
+        return p.hasPrefix(base + "/") ? String(p.dropFirst(base.count + 1)) : p
+    }
+
+    private func kindDirectory(of url: URL) -> String {
+        relativePath(of: url).split(separator: "/").first.map(String.init) ?? ""
+    }
+
+    /// 一ファイルを読み、その path の行を入れ直す。壊れていれば broken の行だけ入れる。
+    private func upsert(_ file: URL) throws {
+        let rel = relativePath(of: file)
+        guard let kind = Kind(rawValue: kindDirectory(of: file)) else { return }
+        let stem = file.deletingPathExtension().lastPathComponent
+        let mtime = (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate?.timeIntervalSince1970) ?? 0
+        let text = try String(contentsOf: file, encoding: .utf8)
+        try queue.write { db in
+            try deleteRows(path: rel, db: db)
+            let node: Node
+            do {
+                node = try FrontMatter.parse(text, kind: kind)
+            } catch {
+                try db.execute(sql: """
+                    INSERT INTO node(path, name, kind, category, "from", "to", isPoint, parent, mtime, broken, mismatch)
+                    VALUES (?, ?, ?, '', 0, NULL, 0, NULL, ?, 1, 0)
+                    """, arguments: [rel, stem, kind.rawValue, mtime])
+                return
+            }
+            try db.execute(sql: """
+                INSERT INTO node(path, name, kind, category, "from", "to", isPoint, parent, mtime, broken, mismatch)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                """, arguments: [rel, node.name, kind.rawValue, node.category, node.from, node.to, node.isPoint, node.parent, mtime, node.name != stem])
+            for a in node.aliases {
+                try db.execute(sql: "INSERT INTO alias(node, \"from\", name) VALUES (?, ?, ?)", arguments: [rel, a.from, a.name])
+            }
+            for m in node.marks {
+                try db.execute(sql: "INSERT INTO mark(node, year, label) VALUES (?, ?, ?)", arguments: [rel, m.year, m.label])
+            }
+            for r in node.rules {
+                try db.execute(sql: "INSERT INTO rule(node, \"from\", \"to\", polity) VALUES (?, ?, ?, ?)", arguments: [rel, r.from, r.to, r.polity])
+            }
+            for l in node.lineages {
+                try db.execute(sql: "INSERT INTO lineage(node, year, kind, origin) VALUES (?, ?, ?, ?)", arguments: [rel, l.year, l.kind, l.origin])
+            }
+            for c in WikiLinks.counts(in: node.body) {
+                try db.execute(sql: "INSERT INTO ref(source, target, count) VALUES (?, ?, ?)", arguments: [rel, c.target, c.count])
+            }
+        }
+    }
+
+    /// path に紐づく行をすべて消す。
+    private func deleteRows(path: String, db: Database) throws {
+        for t in ["alias", "mark", "rule", "lineage"] {
+            try db.execute(sql: "DELETE FROM \(t) WHERE node = ?", arguments: [path])
+        }
+        try db.execute(sql: "DELETE FROM ref WHERE source = ?", arguments: [path])
+        try db.execute(sql: "DELETE FROM node WHERE path = ?", arguments: [path])
+    }
+
+    private func buildSnapshot(world: World, ignored: Int) throws -> Snapshot {
+        var nodes: [String: IndexedNode] = [:]
+        var names: [String: [String]] = [:]
+        var savedNames: [String: [String]] = [:]
+        var rawRefs: [(source: String, target: String)] = []
+        try queue.read { db in
+            var aliases: [String: [Alias]] = [:]
+            for r in try Row.fetchAll(db, sql: "SELECT node, \"from\", name FROM alias ORDER BY rowid") {
+                aliases[r["node"], default: []].append(Alias(from: r["from"], name: r["name"]))
+            }
+            var marks: [String: [Mark]] = [:]
+            for r in try Row.fetchAll(db, sql: "SELECT node, year, label FROM mark ORDER BY rowid") {
+                marks[r["node"], default: []].append(Mark(year: r["year"], label: r["label"]))
+            }
+            var rules: [String: [Rule]] = [:]
+            for r in try Row.fetchAll(db, sql: "SELECT node, \"from\", \"to\", polity FROM rule ORDER BY rowid") {
+                rules[r["node"], default: []].append(Rule(from: r["from"], to: r["to"], polity: r["polity"]))
+            }
+            var lineages: [String: [Lineage]] = [:]
+            for r in try Row.fetchAll(db, sql: "SELECT node, year, kind, origin FROM lineage ORDER BY rowid") {
+                lineages[r["node"], default: []].append(Lineage(year: r["year"], kind: r["kind"], origin: r["origin"]))
+            }
+            for r in try Row.fetchAll(db, sql: "SELECT * FROM node") {
+                let path: String = r["path"]
+                var flags = Set<Flag>()
+                if r["broken"] as Bool { flags.insert(.broken) }
+                if r["mismatch"] as Bool { flags.insert(.nameMismatch) }
+                let n = IndexedNode(
+                    path: path, name: r["name"], kind: Kind(rawValue: r["kind"])!, category: r["category"],
+                    from: r["from"], to: r["to"], isPoint: r["isPoint"], parent: r["parent"], parentPath: nil,
+                    aliases: aliases[path] ?? [], rules: rules[path] ?? [], lineages: lineages[path] ?? [],
+                    marks: marks[path] ?? [], flags: flags
+                )
+                nodes[path] = n
+                // 壊れた行の name は stem であり、名前の一覧には載せない。
+                if !flags.contains(.broken) {
+                    savedNames[n.name, default: []].append(path)
+                    names[n.name, default: []].append(path)
+                    for a in n.aliases { names[a.name, default: []].append(path) }
+                }
+            }
+            for r in try Row.fetchAll(db, sql: "SELECT source, target FROM ref ORDER BY rowid") {
+                rawRefs.append((r["source"], r["target"]))
+            }
+        }
+        // 同じ path が同じ名前を二度持つ（保存名と別名が同じ等）ことはあるので、path を重複なく数える。
+        for (k, v) in names { names[k] = v.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } } }
+        // 重複の印。保存名が二つ以上の path に付いている節点。別名の衝突では付かない。
+        for (path, n) in nodes where (savedNames[n.name]?.count ?? 0) > 1 && !n.flags.contains(.broken) {
+            nodes[path]!.flags.insert(.duplicate)
+        }
+        // 親の解決。保存名で、同じ型で、一意に見つかったときだけ繋ぐ。
+        for (path, n) in nodes {
+            if let p = n.parent, let ps = savedNames[p], ps.count == 1, let parent = nodes[ps[0]], parent.kind == n.kind, ps[0] != path {
+                nodes[path]!.parentPath = ps[0]
+            }
+        }
+        // 参照の解決。
+        var refs: [String: [String]] = [:]
+        var backrefs: [String: [String]] = [:]
+        var unresolved: [String: [String]] = [:]
+        for (source, raw) in rawRefs {
+            if let ps = names[raw], ps.count == 1, ps[0] != source {
+                if refs[source]?.contains(ps[0]) != true { refs[source, default: []].append(ps[0]) }
+                backrefs[ps[0], default: []].append(source)
+            } else if names[raw]?.count != 1 {
+                unresolved[source, default: []].append(raw)
+            }
+        }
+        for k in backrefs.keys { backrefs[k]!.sort { (nodes[$0]?.name ?? $0) < (nodes[$1]?.name ?? $1) } }
+        // 木。開始年、同年は名前。
+        var children: [String: [String]] = [:]
+        var roots: [Kind: [String]] = [:]
+        let ordered = nodes.values.sorted { a, b in a.from != b.from ? a.from < b.from : a.name < b.name }
+        for n in ordered {
+            if let p = n.parentPath { children[p, default: []].append(n.path) } else { roots[n.kind, default: []].append(n.path) }
+        }
+        let extent = Extent.compute(nodes: nodes.values.filter { !$0.flags.contains(.broken) }.map(\.asNode), current: world.current)
+        return Snapshot(world: world, nodes: nodes, names: names, savedNames: savedNames, children: children,
+                        roots: roots, refs: refs, backrefs: backrefs, unresolved: unresolved,
+                        extent: extent, ignoredDirectories: ignored)
+    }
+}
