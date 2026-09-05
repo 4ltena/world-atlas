@@ -128,7 +128,9 @@ public final class VaultStore {
     // MARK: 年表（設計書 8.5、8.6、11 節）
 
     /// 年を動かしてからファイルへ書き戻すまでの間（設計書 4.2）。試験のためだけに縮める。
-    nonisolated(unsafe) static var writeDelay: Duration = .seconds(1)
+    /// 窓ごとの値である。プロセス全体で共有すると、並行に走る試験どうしが互いの値を
+    /// 書き換え合う（Swift Testing は既定でテストを並行に走らせる）。
+    public var writeDelay: Duration = .seconds(1)
 
     /// 表示している年の範囲。幅が決まるまで nil。
     public private(set) var scale: TimelineTransform?
@@ -201,9 +203,10 @@ public final class VaultStore {
         let clamped = min(max(y, e.lo), e.hi + 10)
         guard clamped != year else { return }
         year = clamped
+        let delay = writeDelay
         yearWriteTask?.cancel()
         yearWriteTask = Task { [weak self] in
-            try? await Task.sleep(for: Self.writeDelay)
+            try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
             self?.persistYear()
         }
@@ -260,9 +263,10 @@ public final class VaultStore {
     public func setScale(_ t: TimelineTransform) {
         guard isLoaded else { return }
         scale = t
+        let delay = writeDelay
         scaleWriteTask?.cancel()
         scaleWriteTask = Task { [weak self] in
-            try? await Task.sleep(for: Self.writeDelay)
+            try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
             self?.persistScale()
         }

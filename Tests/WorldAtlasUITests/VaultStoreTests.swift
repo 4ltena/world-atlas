@@ -196,8 +196,7 @@ import WorldAtlasCore
         let v = try TestVault.copiedSample()
         let store = VaultStore(vault: v)
         await store.load()
-        VaultStore.writeDelay = .milliseconds(20)   // 試験のために縮める
-        defer { VaultStore.writeDelay = .seconds(1) }
+        store.writeDelay = .milliseconds(20)   // 試験のために縮める
         store.setYear(404)
         try await until { (try? String(contentsOf: v.appendingPathComponent("世界.yaml"), encoding: .utf8))?
                             .contains("現在: 404") == true }
@@ -207,8 +206,7 @@ import WorldAtlasCore
         let v = try TestVault.copiedSample()
         let store = VaultStore(vault: v)
         await store.load()
-        VaultStore.writeDelay = .milliseconds(40)
-        defer { VaultStore.writeDelay = .seconds(1) }
+        store.writeDelay = .milliseconds(40)
         for y in [310, 320, 330, 340] { store.setYear(y) }
         try await until { (try? String(contentsOf: v.appendingPathComponent("世界.yaml"), encoding: .utf8))?
                             .contains("現在: 340") == true }
@@ -220,8 +218,7 @@ import WorldAtlasCore
         let v = try TestVault.copiedSample()
         let store = VaultStore(vault: v)
         await store.load()
-        VaultStore.writeDelay = .milliseconds(20)
-        defer { VaultStore.writeDelay = .seconds(1) }
+        store.writeDelay = .milliseconds(20)
         store.ensureScale(width: 800)
         store.fitScale(width: 800)
         try await until { VaultState.read(vault: v).visibleFrom != nil }
