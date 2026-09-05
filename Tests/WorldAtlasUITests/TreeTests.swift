@@ -8,19 +8,19 @@ import WorldAtlasCore
         let s = try await TestVault.sample()
         let roots = Tree.build(s, kind: .place, year: 500)
         #expect(Set(roots.map(\.path)) == ["場所/ヴェルダ本土.md", "場所/灰嶺.md", "場所/環海諸島.md"])
-        let 職人街 = try #require(find(roots, "場所/職人街.md"))
-        #expect(職人街.children.map(\.path) == ["場所/鉄鎚亭.md", "場所/ヴォルフ鍛冶場.md", "場所/三日月書肆.md", "場所/新鉄鎚亭.md"])
-        #expect(職人街.category == "区")
+        let district = try #require(find(roots, "場所/職人街.md"))
+        #expect(district.children.map(\.path) == ["場所/鉄鎚亭.md", "場所/ヴォルフ鍛冶場.md", "場所/三日月書肆.md", "場所/新鉄鎚亭.md"])
+        #expect(district.category == "区")
     }
 
     @Test func rowsUseTheNameOfTheYear() async throws {
         let s = try await TestVault.sample()
-        func 邑(_ y: Int) throws -> String {
+        func eldenName(at y: Int) throws -> String {
             try #require(find(Tree.build(s, kind: .place, year: y), "場所/エルデン邑.md")).name
         }
-        #expect(try 邑(200) == "エルデン邑")
-        #expect(try 邑(400) == "王都エルデン")
-        #expect(try 邑(600) == "エルデン市")
+        #expect(try eldenName(at: 200) == "エルデン邑")
+        #expect(try eldenName(at: 400) == "王都エルデン")
+        #expect(try eldenName(at: 600) == "エルデン市")
     }
 
     @Test func queryKeepsHitsAndTheirAncestors() async throws {
