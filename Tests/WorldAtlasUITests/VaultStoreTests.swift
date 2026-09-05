@@ -183,6 +183,194 @@ import WorldAtlasCore
         }
     }
 
+    @Test @MainActor func yearIsClampedToTheWorldPlusTen() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.setYear(-500)
+        #expect(store.year == store.snapshot.extent.lo)
+        store.setYear(99_999)
+        #expect(store.year == store.snapshot.extent.hi + 10)
+    }
+
+    @Test @MainActor func theYearIsWrittenBackToTheWorldFile() async throws {
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        VaultStore.writeDelay = .milliseconds(20)   // 試験のために縮める
+        defer { VaultStore.writeDelay = .seconds(1) }
+        store.setYear(404)
+        try await until { (try? String(contentsOf: v.appendingPathComponent("世界.yaml"), encoding: .utf8))?
+                            .contains("現在: 404") == true }
+    }
+
+    @Test @MainActor func rapidYearChangesWriteOnlyTheLastOne() async throws {
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        VaultStore.writeDelay = .milliseconds(40)
+        defer { VaultStore.writeDelay = .seconds(1) }
+        for y in [310, 320, 330, 340] { store.setYear(y) }
+        try await until { (try? String(contentsOf: v.appendingPathComponent("世界.yaml"), encoding: .utf8))?
+                            .contains("現在: 340") == true }
+        let text = try String(contentsOf: v.appendingPathComponent("世界.yaml"), encoding: .utf8)
+        #expect(!text.contains("現在: 310"))
+    }
+
+    @Test @MainActor func theScaleIsRememberedAsAYearRange() async throws {
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        VaultStore.writeDelay = .milliseconds(20)
+        defer { VaultStore.writeDelay = .seconds(1) }
+        store.ensureScale(width: 800)
+        store.fitScale(width: 800)
+        try await until { VaultState.read(vault: v).visibleFrom != nil }
+        let saved = VaultState.read(vault: v)
+        #expect(saved.visibleTo! > saved.visibleFrom!)
+    }
+
+    @Test @MainActor func aRememberedScaleIsRestoredIntoTheCurrentWidth() async throws {
+        let v = try TestVault.copiedSample()
+        VaultState.write(VaultState(openNode: nil, visibleFrom: 300, visibleTo: 500), vault: v)
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.ensureScale(width: 400)
+        let t = try #require(store.scale)
+        #expect(abs(t.origin - 300) < 0.5)
+        #expect(abs(t.years - 200) < 0.5)
+        #expect(t.width == 400)   // 幅は今の窓のもの
+    }
+
+    @Test @MainActor func aNarrowRememberedScaleIsNotWidenedToFortyYears() async throws {
+        // 12 年まで寄せて閉じたら、12 年で開く。fitting を通すと 40 年へ広がってしまう。
+        let v = try TestVault.copiedSample()
+        VaultState.write(VaultState(openNode: nil, visibleFrom: 300, visibleTo: 312), vault: v)
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.ensureScale(width: 800)
+        let t = try #require(store.scale)
+        #expect(abs(t.origin - 300) < 0.5)
+        #expect(abs(t.years - 12) < 0.5)
+    }
+
+    @Test @MainActor func theScaleIsNotDecidedBeforeTheIndexIsBuilt() async throws {
+        // 窓は load を待たずに一度組まれるので、ensureScale は空の Snapshot で先に呼ばれる。
+        // そこで決めると、幅が変わらないかぎり作り直す契機が無く、狂ったまま残る。
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        store.ensureScale(width: 800)
+        #expect(store.scale == nil)
+        await store.load()
+        store.ensureScale(width: 800)
+        let t = try #require(store.scale)
+        #expect(abs(t.origin - Double(store.snapshot.extent.lo)) < 0.5)
+    }
+
+    @Test @MainActor func theSubtitleNamesTheRootAndTheVisibleRange() async throws {
+        // 設計書 8.1 の `根 職人街｜264–760（世界の 65%）`。
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        // 尺が決まる前は根だけ。何も選んでいなければ根は型の名である。
+        #expect(store.timelineSubtitle == "根 場所")
+        store.select("場所/職人街.md")
+        store.ensureScale(width: 800)
+        store.showWholeWorld(width: 800)
+        #expect(store.timelineSubtitle.hasPrefix("根 職人街｜"))
+        #expect(store.timelineSubtitle.hasSuffix("（世界の 100%）"))
+        // 暦を替えると副題の年も替わる。
+        store.setCalendar("海都暦")
+        let e = store.snapshot.extent
+        #expect(store.timelineSubtitle.contains("\(e.lo + 178)–"))
+    }
+
+    @Test @MainActor func withoutARememberedScaleTheWholeWorldIsShown() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.ensureScale(width: 800)
+        let t = try #require(store.scale)
+        #expect(abs(t.origin - Double(store.snapshot.extent.lo)) < 0.5)
+    }
+
+    @Test @MainActor func timelineRowsFollowTheSelection() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        #expect(store.timelineRows.allSatisfy { !$0.isRoot })    // 何も選んでいない
+        store.select("場所/職人街.md")
+        #expect(store.timelineRows.first?.path == "場所/職人街.md")
+        #expect(store.timelineRows.first?.isRoot == true)
+    }
+
+    @Test @MainActor func draggingTheYearDoesNotMoveTheTreeUntilItIsReleased() async throws {
+        // 設計書 8.6。掴んでいる間は年の読みだけが追随し、木と本文は離すまで動かない。
+        // 木は入れ子なので、探す前に平らにする。
+        func flatten(_ ns: [TreeNode]) -> [TreeNode] { ns.flatMap { [$0] + flatten($0.children) } }
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        func eldenName() -> String? {
+            flatten(store.rows).first { $0.path == "場所/エルデン邑.md" }?.name
+        }
+        #expect(store.year == 500)                 // 見本の 世界.yaml の 現在
+        #expect(eldenName() == "王都エルデン")      // 318 年からの呼び名
+        store.draggingYear = 600
+        #expect(store.displayedYear == 600)
+        #expect(eldenName() == "王都エルデン")      // 掴んでいる間は変わらない
+        store.setYear(600)
+        store.draggingYear = nil
+        #expect(eldenName() == "エルデン市")        // 離すと切り替わる
+    }
+
+    @Test @MainActor func collapsingRemembersTheHeight() async throws {
+        // 高さはアプリ全体の値なので、試験の前後で元へ戻す。
+        let d = UserDefaults.standard
+        let before = d.object(forKey: VaultStore.timelineHeightKey)
+        defer {
+            if let before { d.set(before, forKey: VaultStore.timelineHeightKey) }
+            else { d.removeObject(forKey: VaultStore.timelineHeightKey) }
+        }
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.setTimelineHeight(260)
+        store.timelineCollapsed = true
+        store.timelineCollapsed = false
+        #expect(store.timelineHeight == 260)
+        // 別の窓を開いても同じ高さで始まる（設計書 11 節の @AppStorage の欄）。
+        let other = VaultStore(vault: try TestVault.copiedSample())
+        #expect(other.timelineHeight == 260)
+    }
+
+    @Test @MainActor func theCalendarIsRememberedPerVault() async throws {
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        #expect(store.calendarName == store.snapshot.world.baseCalendar)
+        store.setCalendar("海都暦")
+        #expect(VaultState.read(vault: v).calendar == "海都暦")
+        let again = VaultStore(vault: v)
+        await again.load()
+        #expect(again.calendarName == "海都暦")
+    }
+
+    @Test @MainActor func aRememberedCalendarThatNoLongerExistsFallsBack() async throws {
+        // 世界.yaml から暦が消されていることがある。黙って基準暦へ戻す（設計書 11 節）。
+        let v = try TestVault.copiedSample()
+        VaultState.write(VaultState(openNode: nil, calendar: "存在しない暦"), vault: v)
+        let store = VaultStore(vault: v)
+        await store.load()
+        #expect(store.calendarName == store.snapshot.world.baseCalendar)
+    }
+
+    @Test @MainActor func selectingANodeKeepsTheRememberedScale() async throws {
+        // 既存の select は VaultState を丸ごと書き直していた。尺を消してはいけない。
+        let v = try TestVault.copiedSample()
+        VaultState.write(VaultState(openNode: nil, visibleFrom: 300, visibleTo: 500), vault: v)
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.select("場所/職人街.md")
+        let saved = VaultState.read(vault: v)
+        #expect(saved.openNode == "場所/職人街.md")
+        #expect(saved.visibleFrom == 300)
+        #expect(saved.visibleTo == 500)
+    }
+
     /// 条件が成り立つまで、間を置いて確かめる。監視は非同期なので待ちが要る。
     @MainActor
     private func until(_ limit: Duration = .seconds(5), _ cond: () -> Bool) async throws {

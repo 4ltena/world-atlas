@@ -6,7 +6,18 @@ import Foundation
 public struct VaultState: Codable, Equatable, Sendable {
     /// 開いている節点の、vault からの相対パス。
     public var openNode: String?
-    public init(openNode: String? = nil) { self.openNode = openNode }
+    /// 年表で見えていた年の範囲。窓の幅に依らないよう、点数ではなく年で覚える。
+    public var visibleFrom: Int?
+    public var visibleTo: Int?
+    /// 選んでいた暦の名前。vault ごとの値である（設計書 11 節）。
+    public var calendar: String?
+    public init(openNode: String? = nil, visibleFrom: Int? = nil, visibleTo: Int? = nil,
+                calendar: String? = nil) {
+        self.openNode = openNode
+        self.visibleFrom = visibleFrom
+        self.visibleTo = visibleTo
+        self.calendar = calendar
+    }
 
     static func url(vault: URL) -> URL {
         vault.appendingPathComponent(".atlas/state.json")
