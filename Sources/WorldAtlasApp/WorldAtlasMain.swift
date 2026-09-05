@@ -1,21 +1,19 @@
 import SwiftUI
-import WorldAtlasCore
 import WorldAtlasUI
 
 @main
 struct WorldAtlasMain: App {
     var body: some Scene {
-        // 課題 11 で vault の一覧の窓と vault の窓に置き換える。
-        // ここではレールのアイコンが並ぶだけの窓を出し、.app の組み立てを確かめる。
-        WindowGroup("world-atlas") {
-            VStack(spacing: 16) {
-                ForEach(Kind.allCases, id: \.self) { k in
-                    KindIcon(kind: k)
-                        .stroke(lineWidth: 1.5)
-                        .frame(width: 24, height: 24)
-                }
-            }
-            .padding(24)
+        // 先に書いたほうが起動時に出る。
+        Window("vault を選ぶ", id: "vaults") {
+            VaultListView()
         }
+        .defaultSize(width: 520, height: 420)
+
+        // 同じ URL には既にある窓が使われるので、同じ vault を二度開いても窓は増えない。
+        WindowGroup(for: URL.self) { $url in
+            if let url { VaultWindow(vault: url) }
+        }
+        .defaultSize(width: 1180, height: 760)
     }
 }
