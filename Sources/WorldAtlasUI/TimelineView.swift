@@ -9,6 +9,21 @@ struct TimelineView: View {
     /// 行を縦に流した量。0 が先頭。**課題 12 が動かす。この課題では常に 0 である。**
     @State private var rowScroll: Double = 0
 
+    /// いま何をしている最中か。掴み始め（ピンチ始め）に一つ決めて、終わるまで変えない。
+    private enum Interaction { case year, rows, pan, zoom }
+    @State private var interaction: Interaction?
+    /// 操作を始めたときの尺。操作中はここから作る。
+    @State private var gestureBase: TimelineTransform?
+    /// 縦に流し始めたときの位置。
+    @State private var scrollBase: Double = 0
+
+    /// 相手が用途を握っている間に押されていた側。自分が一度離すまで黙る。
+    @State private var dragBlocked = false
+    @State private var pinchBlocked = false
+
+    @State private var hovering: TimelineHit.Target?
+    @State private var hoverPoint: CGPoint = .zero
+
     var body: some View {
         GeometryReader { geo in
             let rows = store.timelineRows
@@ -22,6 +37,25 @@ struct TimelineView: View {
             canvas(rows: rows, layout: layout, transform: t, scrollY: scrollY,
                    scrolls: scrolls, size: geo.size)
                 .contentShape(Rectangle())
+                .gesture(SimultaneousGesture(dragGesture(size: geo.size, layout: layout, scrolls: scrolls,
+                                                         rowCount: rows.count),
+                                             pinchGesture(size: geo.size)))
+                .onContinuousHover { phase in
+                    switch phase {
+                    case let .active(p):
+                        hoverPoint = p
+                        // 行は流れているので、判定へ渡す前に流した分を戻す。
+                        // 目盛りの帯の中は流れないので、そのまま渡す。
+                        let q = p.y >= TimelineLayout.tickHeight
+                            ? CGPoint(x: p.x, y: p.y + scrollY) : p
+                        hovering = TimelineHit.target(at: q, rows: rows, layout: layout,
+                                                      transform: t, year: store.displayedYear,
+                                                      worldEnd: store.snapshot.extent.hi)
+                    case .ended:
+                        hovering = nil
+                    }
+                }
+                .overlay(alignment: .topLeading) { hoverCard(rows: rows) }
                 .onAppear {
                     store.ensureScale(width: geo.size.width)
                     // 畳んでいる間に立った頼みをここで片づける。onChange は値が
@@ -65,6 +99,132 @@ struct TimelineView: View {
     func maxScroll(layout: TimelineLayout, rowCount: Int, height: Double) -> Double {
         let content = layout.tickHeight + Double(rowCount) * (layout.rowHeight + layout.rowGap)
         return max(content - height, 0)
+    }
+
+    // MARK: 触る
+
+    /// `maxScroll` は課題 11 が置いたものを使う。掴める幅も課題 8 の `TimelineHit.grab` を使う。
+    /// **同じ数を二箇所に書かない。**
+
+    /// 掴み。用途は掴み始めに一つ決め、離すまで変えない。
+    private func dragGesture(size: CGSize, layout: TimelineLayout,
+                             scrolls: Bool, rowCount: Int) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { v in
+                // 相手が用途を握っている間は、こちらは何もしない。相手が離した後も、
+                // 自分が一度離すまで黙る。**でないと、相手の終わりで印が消えた瞬間に、
+                // 掴み始めからの累積の移動量を新しい基準へ当てて尺が跳ぶ。**
+                if let i = interaction, i == .zoom { dragBlocked = true }
+                if dragBlocked { return }
+
+                let base = gestureBase ?? store.scale
+                    ?? .whole(width: size.width, limits: store.snapshot.extent)
+                if gestureBase == nil { gestureBase = base }
+
+                if interaction == nil {
+                    // 年カーソルの線の位置は store.year で見る。掴んでいる間これは動かない。
+                    if v.startLocation.y < TimelineLayout.tickHeight
+                        || abs(v.startLocation.x - base.x(of: Double(store.year))) <= TimelineHit.grab {
+                        interaction = .year
+                    } else if abs(v.translation.height) > abs(v.translation.width),
+                              abs(v.translation.height) > 3, scrolls {
+                        interaction = .rows
+                        scrollBase = rowScroll
+                    } else if abs(v.translation.width) > 3 {
+                        interaction = .pan
+                    }
+                }
+
+                switch interaction {
+                case .year:
+                    let e = store.snapshot.extent
+                    store.draggingYear = min(max(Int(base.year(atX: v.location.x).rounded()), e.lo), e.hi + 10)
+                case .rows:
+                    let limit = maxScroll(layout: layout, rowCount: rowCount, height: size.height)
+                    rowScroll = min(max(scrollBase - v.translation.height, 0), limit)
+                case .pan:
+                    store.setScale(base.panned(byX: Double(v.translation.width), limits: store.snapshot.extent))
+                default:
+                    break   // .zoom がピンチに取られている間、掴みは何もしない
+                }
+            }
+            .onEnded { _ in
+                dragBlocked = false
+                // ピンチが用途を握っているときだけ、こちらは何も片づけない。
+                // **用途が決まらないまま離したとき（押しただけ）も片づける。**
+                // 掴み始めに base を控えているので、残すと次の操作が古い尺から始まって跳ぶ。
+                guard interaction != .zoom else { return }
+                if interaction == .year, let y = store.draggingYear {
+                    // ここで初めて木と原稿の呼び名が切り替わる（設計書 8.6）。
+                    store.setYear(y)
+                }
+                store.draggingYear = nil
+                finishInteraction()
+            }
+    }
+
+    private func pinchGesture(size: CGSize) -> some Gesture {
+        MagnifyGesture(minimumScaleDelta: 0.01)
+            .onChanged { v in
+                if let i = interaction, i != .zoom { pinchBlocked = true }
+                if pinchBlocked { return }
+
+                let base = gestureBase ?? store.scale
+                    ?? .whole(width: size.width, limits: store.snapshot.extent)
+                if gestureBase == nil { gestureBase = base }
+                if interaction == nil { interaction = .zoom }
+                guard interaction == .zoom else { return }
+                store.setScale(base.zoomed(by: Double(v.magnification), aroundX: size.width / 2,
+                                           limits: store.snapshot.extent))
+            }
+            .onEnded { _ in
+                pinchBlocked = false
+                if interaction == .zoom { finishInteraction() }
+            }
+    }
+
+    private func finishInteraction() {
+        interaction = nil
+        gestureBase = nil
+    }
+
+    // MARK: 乗せたときの板
+
+    @ViewBuilder private func hoverCard(rows: [TimelineRow]) -> some View {
+        if let h = hovering, let text = cardText(h, rows: rows) {
+            Text(text)
+                .font(.caption)
+                .padding(.horizontal, 8).padding(.vertical, 5)
+                .background(Palette.sidebar, in: RoundedRectangle(cornerRadius: 4))
+                .offset(x: hoverPoint.x + 10, y: hoverPoint.y - 26)
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// 板に出す文字。設計書 8.6 は要約も挙げているが、Snapshot は本文を持たないので
+    /// この段では名前・種別・期間だけを出す（末尾の「この段では作らないもの」）。
+    ///
+    /// **年はすべて選んだ暦で出す**（設計書 6 節）。目盛りが海都暦 496 年を指しているのに
+    /// 板が 318 と言うと読み違える。暦名を二度出さないよう、期間は `short` を使い、
+    /// 暦名は先頭に一度だけ置く。
+    private func cardText(_ h: TimelineHit.Target, rows: [TimelineRow]) -> String? {
+        let c = store.calendar
+        switch h {
+        case let .row(path):
+            guard let r = rows.first(where: { $0.path == path }) else { return nil }
+            let end = r.isPoint ? "" : "–\(r.to.map(c.short) ?? "現在")"
+            return "\(r.name)（\(r.category)）\(c.name) \(c.short(r.from))\(end) 年"
+        case let .mark(path, year):
+            guard let r = rows.first(where: { $0.path == path }),
+                  let m = r.marks.first(where: { $0.year == year }) else { return nil }
+            return "\(c.format(year)) \(m.label)"
+        case let .rename(path, year):
+            guard let r = rows.first(where: { $0.path == path }),
+                  let a = r.renames.first(where: { $0.from == year }) else { return nil }
+            return "\(c.format(year)) \(a.name) へ改称"
+        case .ticks, .cursor:
+            return nil
+        }
     }
 
     // MARK: 描く
