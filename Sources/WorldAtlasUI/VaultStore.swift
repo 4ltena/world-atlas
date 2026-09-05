@@ -205,7 +205,7 @@ public final class VaultStore {
         yearWriteTask = Task { [weak self] in
             try? await Task.sleep(for: Self.writeDelay)
             guard !Task.isCancelled else { return }
-            await self?.persistYear()
+            self?.persistYear()
         }
     }
 
@@ -264,7 +264,7 @@ public final class VaultStore {
         scaleWriteTask = Task { [weak self] in
             try? await Task.sleep(for: Self.writeDelay)
             guard !Task.isCancelled else { return }
-            await self?.persistScale()
+            self?.persistScale()
         }
     }
 
