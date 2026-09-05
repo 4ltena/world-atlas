@@ -16,14 +16,18 @@ public struct TimelineTransform: Equatable, Sendable {
     /// 行が狭いときに広げる幅（設計書 8.6）。
     public static let narrowFit = 40.0
 
+    /// **幅と倍率は必ず正の有限値にして持つ。**SwiftUI の `GeometryReader` は組み上がる前に
+    /// 0 を返すことがあり、そのまま `pxPerYear` が 0 になると `years` が NaN、
+    /// `year(atX:)` が ±∞ になる。**NaN の範囲は `...` の前提条件で落ち、∞ の `Int` 変換も落ちる。**
+    /// 見えていない一瞬のために描画側へ番人を撒くより、値型の側で不正な値を作らせない。
     public init(origin: Double, pxPerYear: Double, width: Double) {
-        self.origin = origin
-        self.pxPerYear = pxPerYear
-        self.width = width
+        self.origin = origin.isFinite ? origin : 0
+        self.width = width.isFinite && width > 0 ? width : 1
+        self.pxPerYear = pxPerYear.isFinite && pxPerYear > 0 ? pxPerYear : self.width / Self.minimumYears
     }
 
     /// 画面に入っている年数。
-    public var years: Double { width / pxPerYear }
+    public var years: Double { pxPerYear > 0 ? width / pxPerYear : Self.minimumYears }
 
     public func x(of year: Double) -> Double { (year - origin) * pxPerYear }
     public func year(atX x: Double) -> Double { origin + x / pxPerYear }

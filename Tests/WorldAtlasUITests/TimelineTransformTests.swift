@@ -101,6 +101,27 @@ import WorldAtlasCore
         #expect(abs(t.years - Double(world.hi + 10 - world.lo)) < 0.001)
     }
 
+    @Test func aZeroWidthNeverProducesNaN() {
+        // GeometryReader は組み上がる前に 0 を返すことがある。years が NaN になると、
+        // それで作った範囲が `...` の前提条件で落ちる（課題 11 が origin...(origin+years) を作る）。
+        for t in [TimelineTransform.whole(width: 0, limits: world),
+                  TimelineTransform.fitting(300...400, width: 0, limits: world),
+                  TimelineTransform.showing(300...400, width: 0, limits: world)] {
+            #expect(t.years.isFinite)
+            #expect(t.pxPerYear > 0)
+            #expect(t.year(atX: 0).isFinite)
+            #expect(t.x(of: 500).isFinite)
+        }
+    }
+
+    @Test func aDegenerateTransformFallsBackInsteadOfDividingByZero() {
+        // 直に作られた場合も守る。∞ を Int へ落とすと落ちる（課題 12 が年を丸める）。
+        let t = TimelineTransform(origin: 100, pxPerYear: 0, width: 800)
+        #expect(t.years.isFinite)
+        #expect(t.year(atX: 400).isFinite)
+        #expect(Int(t.year(atX: 400).rounded()) >= Int.min)
+    }
+
     @Test func aWorldNarrowerThanTheMinimumIsCentred() {
         // まだ節点が少ない vault では、世界が 12 年より狭いことがある。
         let tiny = Extent(lo: 1, hi: 3)
