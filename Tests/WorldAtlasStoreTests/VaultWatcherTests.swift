@@ -27,7 +27,10 @@ import WorldAtlasCore
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try "x".write(to: dir.appendingPathComponent("state.json"), atomically: true, encoding: .utf8)
         try await Task.sleep(for: .seconds(1))
-        #expect(received.value.isEmpty)
+        // .atlas 配下（ディレクトリ自体と中の state.json）が報告に含まれないことだけを検査する。
+        // SampleVault.copy() 直後は世界.md/世界.yaml 等のコピー由来イベントが遅れて届くことがあり、
+        // 「何も届かない」という主張はこのテストの本来の要求より強すぎる。
+        #expect(!received.value.contains { $0.path.contains("/.atlas") })
     }
 
     @Test func externalEditReachesTheSnapshot() async throws {

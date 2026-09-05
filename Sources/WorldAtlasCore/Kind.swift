@@ -13,10 +13,11 @@ public enum Kind: String, CaseIterable, Sendable, Codable {
 }
 
 /// 索引が節点に付ける印。複数が同時に付くので集合で持ち、空なら正常である。
-/// 壊れている と 名前の不一致 はファイル単位で決まり索引に持つ。重複 は保存名の一覧から
+/// 壊れている と 名前の不一致 はファイル単位で決まり索引に持つ。重複 と 親が輪 は
 /// snapshot を作るときに計算し、索引には持たない。
 public enum Flag: String, Sendable, Codable, Hashable {
     case broken = "壊れている"
     case nameMismatch = "名前の不一致"
     case duplicate = "重複"
+    case cycle = "親が輪"
 }

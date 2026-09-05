@@ -3,13 +3,15 @@ import PackageDescription
 
 // world-atlas。WorldAtlasCore は依存なしの判断層で、ファイルも DB も触らない。
 // WorldAtlasStore は GRDB の索引と監視を持ち、Core に依存する。
-// WorldAtlasApp は画面で、Core と Store に依存する。swift test は GUI を起動しない。
+// WorldAtlasUI は画面と、画面のための判断を持つ。WorldAtlasApp は @main だけである。
+// swift test は GUI を起動しない。
 let package = Package(
     name: "WorldAtlas",
     platforms: [.macOS(.v26)],
     products: [
         .library(name: "WorldAtlasCore", targets: ["WorldAtlasCore"]),
         .library(name: "WorldAtlasStore", targets: ["WorldAtlasStore"]),
+        .library(name: "WorldAtlasUI", targets: ["WorldAtlasUI"]),
         .executable(name: "WorldAtlasApp", targets: ["WorldAtlasApp"]),
     ],
     dependencies: [
@@ -30,9 +32,14 @@ let package = Package(
             ],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
+        .target(
+            name: "WorldAtlasUI",
+            dependencies: ["WorldAtlasCore", "WorldAtlasStore"],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
         .executableTarget(
             name: "WorldAtlasApp",
-            dependencies: ["WorldAtlasCore", "WorldAtlasStore"],
+            dependencies: ["WorldAtlasUI"],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
@@ -43,6 +50,11 @@ let package = Package(
         .testTarget(
             name: "WorldAtlasStoreTests",
             dependencies: ["WorldAtlasStore"],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
+            name: "WorldAtlasUITests",
+            dependencies: ["WorldAtlasUI", "WorldAtlasStore", "WorldAtlasCore"],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]

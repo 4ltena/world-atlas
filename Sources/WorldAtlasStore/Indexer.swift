@@ -249,12 +249,18 @@ public actor Indexer {
         }
         // 親の輪を切る。輪の節点はどれも parentPath を持つので roots に入らず、互いの
         // children にしか現れないため木から永久に見えなくなる。輪を閉じる一辺だけを
-        // nil にすると、その節点が根になり残りはその子として辿れる。印は付けない。
-        for start in nodes.keys {
+        // nil にすると、その節点が根になり残りはその子として辿れる。切った側には
+        // 印を付け、親のリンクが消えた理由が木に出るようにする。
+        // path の順で辿るので、同じ vault なら何度索引しても同じ辺を切る。
+        for start in nodes.keys.sorted() {
             var seen: Set<String> = [start]
             var cur = start
             while let next = nodes[cur]!.parentPath {
-                if !seen.insert(next).inserted { nodes[cur]!.parentPath = nil; break }
+                if !seen.insert(next).inserted {
+                    nodes[cur]!.parentPath = nil
+                    nodes[cur]!.flags.insert(.cycle)
+                    break
+                }
                 cur = next
             }
         }

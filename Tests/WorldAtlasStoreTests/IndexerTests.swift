@@ -188,12 +188,70 @@ import WorldAtlasCore
         #expect(s.rulers(of: "場所/甲.md", at: 500).isEmpty)
         #expect(s.rulers(of: "場所/乙.md", at: 500).isEmpty)
         // 輪を閉じる一辺だけを切るので、片方が根になり、もう片方はその子として木から見える。
-        // どちらが切られるかは辞書の順に依るので、名前を決め打ちしない。
+        // どちらを切るかは path の昇順で辿って決まる（Stage 2 で決定的にした）。ここでは
+        // 規則そのものは新しいテストが押さえるので、名前ではなく印の付き方だけを見る。
         let places = Set(s.roots[.place] ?? [])
         #expect(places.intersection(["場所/甲.md", "場所/乙.md"]).count == 1)
         let root = places.contains("場所/甲.md") ? "場所/甲.md" : "場所/乙.md"
         let child = root == "場所/甲.md" ? "場所/乙.md" : "場所/甲.md"
         #expect(s.children[root]?.contains(child) == true)
+        // 切られた側にだけ印が付く。
+        #expect(s.nodes[root]?.flags == [.cycle])
+        #expect(s.nodes[child]?.flags.isEmpty == true)
+    }
+
+    @Test func aTwoNodeCycleIsCutAtTheClosingEdge() async throws {
+        // 環A の親が 環B、環B の親が 環A。path の順（環A が先）に辿るので、輪を閉じる
+        // 辺は 環B の親である。切られて根になるのは 環B、印が付くのも 環B だけである。
+        let vault = try SampleVault.copy()
+        try writeRing(vault, [("環A", "環B"), ("環B", "環A")])
+
+        let s = try await Indexer(vault: vault).rebuild()
+        let a = try #require(s.nodes["場所/環A.md"])
+        let b = try #require(s.nodes["場所/環B.md"])
+        #expect(b.parentPath == nil)
+        #expect(b.flags == [.cycle])
+        #expect(a.parentPath == "場所/環B.md")
+        #expect(a.flags.isEmpty)
+        #expect(s.roots[.place]?.contains("場所/環B.md") == true)
+        #expect(s.children["場所/環B.md"] == ["場所/環A.md"])
+    }
+
+    @Test func aThreeNodeCycleIsCutAtTheClosingEdgeToo() async throws {
+        // 環A → 環B → 環C → 環A。環A から辿るので、輪を閉じるのは 環C の親である。
+        let vault = try SampleVault.copy()
+        try writeRing(vault, [("環A", "環B"), ("環B", "環C"), ("環C", "環A")])
+
+        let s = try await Indexer(vault: vault).rebuild()
+        #expect(Set(s.nodes.values.filter { $0.flags.contains(.cycle) }.map(\.path)) == ["場所/環C.md"])
+        #expect(s.nodes["場所/環C.md"]?.parentPath == nil)
+        #expect(s.nodes["場所/環B.md"]?.parentPath == "場所/環C.md")
+        #expect(s.nodes["場所/環A.md"]?.parentPath == "場所/環B.md")
+    }
+
+    @Test func theRestOfTheVaultIsUntouchedByACycle() async throws {
+        let vault = try SampleVault.copy()
+        try writeRing(vault, [("環A", "環B"), ("環B", "環A")])
+        let s = try await Indexer(vault: vault).rebuild()
+        // 輪と関係の無い節点に印は付かない。
+        #expect(s.nodes["場所/職人街.md"]?.flags.isEmpty == true)
+        #expect(s.nodes["場所/職人街.md"]?.parentPath == "場所/エルデン邑.md")
+    }
+
+    /// 親が輪になった 場所 の節点を書き込む。
+    private func writeRing(_ vault: URL, _ pairs: [(String, String)]) throws {
+        let dir = vault.appendingPathComponent("場所")
+        for (name, parent) in pairs {
+            try """
+            ---
+            名前: \(name)
+            種別: 領
+            期間: [1, 現在]
+            親: \(parent)
+            ---
+
+            """.write(to: dir.appendingPathComponent("\(name).md"), atomically: true, encoding: .utf8)
+        }
     }
 
     /// 索引を通さず Snapshot を手で組む。buildSnapshot の輪の検出を経ないので、
