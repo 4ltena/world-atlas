@@ -67,4 +67,15 @@ public enum RecentVaults {
     public static func remove(_ list: [RecentVault], path: String) -> [RecentVault] {
         list.filter { $0.path != path }
     }
+
+    /// 一覧の四角の色の番号。path から決めるので、一覧の順が変わっても入れ替わらない。
+    /// **`String.hashValue` を使わない。**あれはプロセスごとに種が変わるので、
+    /// 起動するたびに色が入れ替わる（Swift の `Hashable` はそう定めている）。
+    /// djb2 の畳み込み。衝突しても色が重なるだけで害は無い。
+    public static func colorIndex(of path: String, count: Int) -> Int {
+        guard count > 0 else { return 0 }
+        var h: UInt64 = 5381
+        for b in path.utf8 { h = h &* 33 &+ UInt64(b) }
+        return Int(h % UInt64(count))
+    }
 }

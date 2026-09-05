@@ -76,4 +76,21 @@ import Testing
         let out = RecentVaults.touch(list, path: "/tmp/a", world: "灰海", now: Date())
         #expect(out[0].nodes == 41)
     }
+
+    @Test func theColourIndexIsTheSameInEveryRun() {
+        // 起動をまたいで同じ色になることが要件である。既知の値で固定する。
+        // これが落ちたら、プロセスごとに種の変わる hashValue に戻っていないか疑う。
+        #expect(RecentVaults.colorIndex(of: "/tmp/a", count: 5) == 0)
+        #expect(RecentVaults.colorIndex(of: "/tmp/b", count: 5) == 1)
+        #expect(RecentVaults.colorIndex(of: "/Users/kn/vaults/灰海", count: 5) == 4)
+    }
+
+    @Test func theColourIndexStaysInsideTheRange() {
+        for p in ["", "a", "/x/y/z", "とても長い名前のついた世界の置き場所"] {
+            let i = RecentVaults.colorIndex(of: p, count: 5)
+            #expect(i >= 0 && i < 5)
+        }
+        // 色が一つも無いときでも落ちない。
+        #expect(RecentVaults.colorIndex(of: "a", count: 0) == 0)
+    }
 }

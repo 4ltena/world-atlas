@@ -122,7 +122,8 @@ public struct VaultListView: View {
             HStack(alignment: .top, spacing: 13) {
                 Text(String(v.world.prefix(1)))
                     .frame(width: 34, height: 34)
-                    .background(Palette.polity(abs(v.path.hashValue)), in: RoundedRectangle(cornerRadius: 6))
+                    .background(Palette.polity(RecentVaults.colorIndex(of: v.path, count: Palette.polityCount)),
+                                in: RoundedRectangle(cornerRadius: 6))
                     .foregroundStyle(.black)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(v.world)
