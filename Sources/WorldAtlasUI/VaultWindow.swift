@@ -25,6 +25,12 @@ public struct VaultWindow: View {
         .task { await store.load() }
         .onDisappear { Task { await store.stop() } }
         .focusedSceneValue(\.vaultStore, store)
+        .environment(\.openURL, OpenURLAction { url in
+            // 自分のスキームは必ず自分で受ける。解決先が無ければ何もしない。
+            guard let path = NodeURL.path(from: url) else { return .systemAction }
+            if store.snapshot.nodes[path] != nil { store.select(path) }
+            return .handled
+        })
         .overlay {
             if let e = store.loadError {
                 ContentUnavailableView("この vault を読めません", systemImage: "exclamationmark.triangle", description: Text(e))

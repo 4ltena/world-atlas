@@ -15,5 +15,6 @@ struct WorldAtlasMain: App {
             if let url { VaultWindow(vault: url) }
         }
         .defaultSize(width: 1180, height: 760)
+        .commands { AppCommands() }
     }
 }
