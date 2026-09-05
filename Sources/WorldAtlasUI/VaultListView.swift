@@ -102,11 +102,14 @@ public struct VaultListView: View {
             // ディレクトリ自体が無いのか、世界.yaml が無いのか、あるが読めないのかで、
             // 次にできることが違う。最近使った一覧の行は、移した・捨てた vault を
             // 指していることがあり、それが実際には一番起こりやすい。
-            if !fm.fileExists(atPath: url.path, isDirectory: &isDirectory) || !isDirectory.boolValue {
+            if !fm.fileExists(atPath: url.path, isDirectory: &isDirectory) {
                 // 選び直しも新規作成もこの場所には効かない（フォルダ選択は既存フォルダしか
                 // 選べず、同じ場所は作れない）ので勧めない。
                 failure = "\(url.lastPathComponent) が見つかりません。"
                     + "移したのなら「開く…」で新しい場所を選び直し、要らないなら行を副ボタンで押して「一覧から外す」を選んでください。"
+            } else if !isDirectory.boolValue {
+                failure = "\(url.lastPathComponent) はディレクトリではありません。vault はディレクトリです。"
+                    + "「開く…」で選び直すか、行を副ボタンで押して「一覧から外す」を選んでください。"
             } else if fm.fileExists(atPath: worldFile.path) {
                 // 在るときは新規作成が断られる（VaultCreator は存在するだけで拒否する）ので勧めない。
                 let detail = (error as? FrontMatterError).map { e in

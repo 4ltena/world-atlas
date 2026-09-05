@@ -169,8 +169,10 @@ public final class VaultStore {
             return e.line.map { "世界.yaml の \($0) 行目: \(e.message)" } ?? "世界.yaml: \(e.message)"
         }
         if let e = error as? IndexerError { return e.message }
-        // ここへ来るのは索引を作れなかった類。生の error は英語のことがあるので、
-        // 日本語で何が起きたかと確かめるべきことを先に置き、理由は手がかりとして添える。
-        return "この vault の索引を作れませんでした。ディスクの空きと、このディレクトリへ書き込めるかを確かめてください。\n\n理由: \(error.localizedDescription)"
+        // ここへ来るのは索引を作れなかった類（GRDB の DatabaseError など）。何が起きたかと
+        // 確かめることは日本語で伝え、ライブラリからの理由はそのまま引用する。
+        // GRDB は localizedDescription にも英語の説明を入れるので、地域化は期待できない。
+        return "この vault の索引を作れませんでした。ディスクの空きと、このディレクトリへ書き込めるかを確かめてください。"
+            + "\n\nシステムからの理由（英語のことがあります）: \(error.localizedDescription)"
     }
 }
