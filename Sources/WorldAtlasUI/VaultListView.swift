@@ -90,14 +90,24 @@ public struct VaultListView: View {
     }
 
     private func open(_ url: URL) {
+        let worldFile = url.appendingPathComponent("世界.yaml")
         do {
-            let text = try String(contentsOf: url.appendingPathComponent("世界.yaml"), encoding: .utf8)
+            let text = try String(contentsOf: worldFile, encoding: .utf8)
             let world = try WorldFile.parse(text)
             remember(url, world: world.name)
             openWindow(value: url)
         } catch {
-            failure = "\(url.lastPathComponent) を vault として開けません（世界.yaml を読めませんでした）。"
-                + "世界.yaml のあるディレクトリを選び直すか、「新規作成…」でこのディレクトリを vault にしてください。"
+            // 世界.yaml が無いのか、あるが読めないのかで、次にできることが違う。
+            // 在るときは新規作成が断られる（VaultCreator は存在するだけで拒否する）ので勧めない。
+            if FileManager.default.fileExists(atPath: worldFile.path) {
+                let detail = (error as? FrontMatterError).map { e in
+                    e.line.map { "\($0) 行目: \(e.message)" } ?? e.message
+                } ?? error.localizedDescription
+                failure = "\(url.lastPathComponent) の 世界.yaml を読めませんでした。直してから開き直してください。\n\n理由: \(detail)"
+            } else {
+                failure = "\(url.lastPathComponent) を vault として開けません（世界.yaml がありません）。"
+                    + "世界.yaml のあるディレクトリを選び直すか、「新規作成…」でこのディレクトリを vault にしてください。"
+            }
         }
     }
 
