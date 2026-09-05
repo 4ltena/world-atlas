@@ -18,7 +18,7 @@ public struct TimelineLayout: Equatable, Sendable {
 
     public var tickHeight: Double { Self.tickHeight }
     public var rowGap: Double { Self.rowGap }
-    public var showsLabels: Bool { rowHeight >= Self.labelThreshold }
+    public var showsLabels: Bool { rowHeight > Self.labelThreshold }
 
     public func y(ofRow i: Int) -> Double {
         Self.tickHeight + Double(i) * (rowHeight + Self.rowGap)

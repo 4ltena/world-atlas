@@ -58,6 +58,18 @@ import WorldAtlasCore
         #expect(TimelineLayout.maximumRowHeight > TimelineLayout.labelThreshold)
     }
 
+    @Test func exactlyTheThresholdDoesNotShowLabels() {
+        // 設計書 8.6 は「超えると」であって「以上」ではない。ちょうど 24 では出ない。
+        // 8 行・高さ 230 で (230 - 22) / 8 - 2 = 24 ちょうどになる。
+        let exact = TimelineLayout.fitting(rowCount: 8, height: 230).layout
+        #expect(exact.rowHeight == TimelineLayout.labelThreshold)
+        #expect(!exact.showsLabels)
+        // 1 点でも高ければ出る。
+        let taller = TimelineLayout.fitting(rowCount: 8, height: 231).layout
+        #expect(taller.rowHeight > TimelineLayout.labelThreshold)
+        #expect(taller.showsLabels)
+    }
+
     @Test func rowAndYAreInverses() {
         let (l, _) = TimelineLayout.fitting(rowCount: 5, height: 300)
         for i in 0..<5 {
