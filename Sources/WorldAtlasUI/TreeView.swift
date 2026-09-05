@@ -5,18 +5,14 @@ import WorldAtlasCore
 struct TreeView: View {
     @Bindable var store: VaultStore
 
-    private var selection: Binding<String?> {
-        Binding(get: { store.selected }, set: { store.select($0) })
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             selectedBar
-            Divider()
-            List(selection: selection) {
+            List {
                 ForEach(store.rows) { TreeRow(node: $0, store: store) }
             }
             .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
             .overlay { if store.rows.isEmpty { empty } }
         }
     }
@@ -80,6 +76,19 @@ struct TreeRow: View {
                         .map(\.rawValue).joined(separator: "、"))
             }
         }
-        .tag(node.path)
+        .contentShape(Rectangle())
+        .onTapGesture { store.select(node.path) }
+        .listRowBackground(rowBackground)
+    }
+
+    /// 選んでいる行は全幅に霞を敷き、左端に幅 2 の朱の帯を出す（設計書 8.2）。
+    /// macOS の標準の選択は角丸を内側に敷く形で、この意匠とは違うので使わない。
+    @ViewBuilder private var rowBackground: some View {
+        if store.selected == node.path {
+            ZStack(alignment: .leading) {
+                Palette.veil
+                Palette.accent.frame(width: 2)
+            }
+        }
     }
 }

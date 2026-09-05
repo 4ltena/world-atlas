@@ -13,9 +13,9 @@ public struct VaultWindow: View {
         NavigationSplitView {
             HStack(spacing: 0) {
                 RailView(store: store)
-                Divider()
                 TreeView(store: store)
             }
+            .background(Palette.sidebar)
             .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 460)
         } detail: {
             ManuscriptView(store: store)
