@@ -75,6 +75,7 @@ public final class VaultStore {
             indexer = ix
             let s = try await ix.rebuild()
             snapshot = s
+            recordRecent(s)
             calendarName = s.world.baseCalendar
             year = s.world.current
             // 覚えていた節点が消えていたら、黙って既定へ戻す（設計書 11 節）。
@@ -117,6 +118,16 @@ public final class VaultStore {
     }
 
     // MARK: 内部
+
+    /// 一覧の三段目のための材料を書き戻す（設計書 4.1）。一覧の窓は索引しないので、
+    /// ここで書いたものがそのまま出る。開いたことのない vault は二段のままになる。
+    private func recordRecent(_ s: Snapshot) {
+        let d = UserDefaults.standard
+        let list = RecentVaults.decode(d.string(forKey: RecentVaults.storageKey) ?? "[]")
+        let out = RecentVaults.record(list, path: vault.path, nodes: s.nodes.count,
+                                      from: s.extent.lo, to: s.extent.hi)
+        d.set(RecentVaults.encode(out), forKey: RecentVaults.storageKey)
+    }
 
     private func apply(_ s: Snapshot) {
         snapshot = s

@@ -45,4 +45,35 @@ import Testing
         #expect(RecentVaults.remove(l, path: "/tmp/A").map(\.path) == ["/tmp/B"])
         #expect(RecentVaults.remove(l, path: "/tmp/無い").count == 2)
     }
+
+    @Test func oldEntriesWithoutCountsStillDecode() {
+        // Stage 2 が書いた JSON には件数の鍵が無い。読めなくなってはいけない。
+        let json = #"[{"path":"/tmp/a","world":"灰海","openedAt":0}]"#
+        let list = RecentVaults.decode(json)
+        #expect(list.count == 1)
+        #expect(list[0].nodes == nil)
+    }
+
+    @Test func recordingCountsKeepsThePositionAndTheRest() {
+        let list = [RecentVault(path: "/tmp/a", world: "灰海", openedAt: Date(timeIntervalSince1970: 0)),
+                    RecentVault(path: "/tmp/b", world: "碧", openedAt: Date(timeIntervalSince1970: 1))]
+        let out = RecentVaults.record(list, path: "/tmp/b", nodes: 41, from: 96, to: 712)
+        #expect(out.map(\.path) == ["/tmp/a", "/tmp/b"])   // 並びは動かさない
+        #expect(out[1].nodes == 41)
+        #expect(out[1].from == 96)
+        #expect(out[1].world == "碧")
+    }
+
+    @Test func recordingAnUnknownPathChangesNothing() {
+        let list = [RecentVault(path: "/tmp/a", world: "灰海", openedAt: Date(timeIntervalSince1970: 0))]
+        #expect(RecentVaults.record(list, path: "/tmp/z", nodes: 1, from: 1, to: 2) == list)
+    }
+
+    @Test func touchingAgainKeepsTheCountsAlreadyRecorded() {
+        // 開き直した時点ではまだ索引していない。前回の件数を消してはいけない。
+        var list = [RecentVault(path: "/tmp/a", world: "灰海", openedAt: Date(timeIntervalSince1970: 0))]
+        list = RecentVaults.record(list, path: "/tmp/a", nodes: 41, from: 96, to: 712)
+        let out = RecentVaults.touch(list, path: "/tmp/a", world: "灰海", now: Date())
+        #expect(out[0].nodes == 41)
+    }
 }
