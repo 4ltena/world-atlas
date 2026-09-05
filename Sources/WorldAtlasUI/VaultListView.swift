@@ -96,7 +96,8 @@ public struct VaultListView: View {
             remember(url, world: world.name)
             openWindow(value: url)
         } catch {
-            failure = "\(url.lastPathComponent) は vault ではないようです（世界.yaml を読めません）。"
+            failure = "\(url.lastPathComponent) を vault として開けません（世界.yaml を読めませんでした）。"
+                + "世界.yaml のあるディレクトリを選び直すか、「新規作成…」でこのディレクトリを vault にしてください。"
         }
     }
 
@@ -109,7 +110,9 @@ public struct VaultListView: View {
         } catch let e as VaultCreator.Failure {
             failure = e.message
         } catch {
-            failure = "作れませんでした: \(error)"
+            // 日本語で何が起きたかと次の一手を先に出し、OS の理由は手がかりとして添える。
+            // `\(error)` は NSError の生の記述で、英語のまま出ることがある。
+            failure = "この場所には vault を作れませんでした。書き込みできる別のディレクトリを選んでください。\n\n理由: \(error.localizedDescription)"
         }
     }
 
