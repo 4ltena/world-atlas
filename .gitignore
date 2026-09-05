@@ -4,3 +4,5 @@ docs/superpowers/
 *.xcodeproj
 .atlas/
 build/
+.worktrees/
+WorldAtlas.app/
