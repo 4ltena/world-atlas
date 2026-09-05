@@ -36,7 +36,8 @@ public final class VaultStore {
     }
 
     private var indexer: Indexer?
-    // 本文の読み込みが前後しても、最後に頼んだものだけを採る。
+    // 本文の読み込みが前後しても、最後に頼んだものだけを採る。頼む側が同期のうちに
+    // 増やし、そのときの値と対象を reloadText へ渡す。
     private var textToken = 0
 
     public init(vault: URL) { self.vault = vault }
@@ -80,7 +81,8 @@ public final class VaultStore {
             let remembered = VaultState.read(vault: vault).openNode
             selected = remembered.flatMap { s.nodes[$0] != nil ? $0 : nil }
             if let p = selected { kind = s.nodes[p]!.kind; reveal(p) }
-            await reloadText()
+            textToken += 1
+            await reloadText(token: textToken, target: selected)
             try await ix.startWatching { [weak self] snap in
                 Task { @MainActor in self?.apply(snap) }
             }
@@ -98,7 +100,11 @@ public final class VaultStore {
         }
         selected = path
         VaultState.write(VaultState(openNode: path), vault: vault)
-        Task { await reloadText() }
+        // 選んだその場で古い読み込みを無効にする。予約した task が走り始めるのを
+        // 待つと、その隙に前の読み込みが再開して古い本文を書けてしまう。
+        textToken += 1
+        let token = textToken
+        Task { await reloadText(token: token, target: path) }
     }
 
     public func goToParent() {
@@ -116,7 +122,10 @@ public final class VaultStore {
         snapshot = s
         // 開いていた節点が消えたら、概要へ戻す。
         if let p = selected, s.nodes[p] == nil { selected = nil }
-        Task { await reloadText() }
+        textToken += 1
+        let token = textToken
+        let target = selected
+        Task { await reloadText(token: token, target: target) }
     }
 
     /// path が木の中で見えるように、祖先をすべて開く。
@@ -129,10 +138,9 @@ public final class VaultStore {
         }
     }
 
-    private func reloadText() async {
-        textToken += 1
-        let token = textToken
-        let target = selected
+    /// token が最新のままの時だけ書き込む。頼まれた対象を一緒に受け取るので、
+    /// 待っているあいだに選択が変わっても、この読み込みは頼まれたものを読み続ける。
+    private func reloadText(token: Int, target: String?) async {
         var loaded = ""
         var whole = ""
         var failure: String?

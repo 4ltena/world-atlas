@@ -145,6 +145,44 @@ import WorldAtlasCore
         #expect(store.snapshot.nodes["場所/新しい邑.md"]?.name == "新しい邑")
     }
 
+    @Test @MainActor func aSupersededReadNeverShowsItsBody() async throws {
+        // 選び直したその場で古い読み込みを無効にしないと、先の読み込みが await から戻った
+        // ときに前の節点の本文を書けてしまう。落ち着いた先の値は正しくなるので、途中で
+        // 通り過ぎる値を見て確かめる。隙に入れるかどうかは main の混み具合で決まるので、
+        // 入れなかった回は数えずに何度か試す。
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        let district = "外壁の内側"    // 場所/職人街.md の本文
+        let inn = "四年後に建った宿"   // 場所/鉄鎚亭.md の本文
+        for _ in 0..<8 {
+            store.select(nil)
+            try await until { store.text.contains("内海をはさんで") }
+            store.select("場所/職人街.md")
+            // 職人街 の読み込みを最初の待ちまで進めてから、その続きと同じ列に並べて選び直す。
+            await Task.yield()
+            let switched = Task { @MainActor () -> String in
+                let before = store.text
+                store.select("場所/鉄鎚亭.md")
+                return before
+            }
+            // 譲るたびに見る。until の 50 ミリ秒の待ちでは、一瞬の食い違いを通り越す。
+            var seen: [String] = []
+            let deadline = ContinuousClock.now + .seconds(5)
+            while !store.text.contains(inn) {
+                if seen.last != store.text { seen.append(store.text) }
+                guard ContinuousClock.now < deadline else {
+                    Issue.record("鉄鎚亭 の本文が来なかった")
+                    return
+                }
+                await Task.yield()
+            }
+            // 選び直した時点で既に 職人街 の本文が出ていたなら、隙に入れていない回である。
+            let before = await switched.value
+            if before.contains(district) { continue }
+            #expect(!seen.contains { $0.contains(district) })
+        }
+    }
+
     /// 条件が成り立つまで、間を置いて確かめる。監視は非同期なので待ちが要る。
     @MainActor
     private func until(_ limit: Duration = .seconds(5), _ cond: () -> Bool) async throws {
