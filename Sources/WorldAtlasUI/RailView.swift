@@ -21,6 +21,7 @@ struct RailView: View {
                 .buttonStyle(.plain)
                 .help(k.rawValue)
                 .accessibilityLabel(k.rawValue)
+                .accessibilityAddTraits(store.kind == k ? [.isButton, .isSelected] : .isButton)
             }
             Spacer()
         }

@@ -67,7 +67,9 @@ public struct TimelineTransform: Equatable, Sendable {
         } else {
             t.origin = min(max(origin, b.lowerBound), b.upperBound - years)
         }
-        return t
+        // init を通して不変条件を守る。有限値に対しては恒等である。
+        // zoomed・panned・ensureScale はすべてここを通るので、一箇所で塞げる。
+        return Self(origin: t.origin, pxPerYear: t.pxPerYear, width: t.width)
     }
 
     /// 年の範囲を画面へ当てはめる。40 年未満の行は、その中心のまわりに 40 年へ広げる。

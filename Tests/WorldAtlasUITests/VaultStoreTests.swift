@@ -202,6 +202,17 @@ import WorldAtlasCore
                             .contains("現在: 404") == true }
     }
 
+    @Test @MainActor func closingTheWindowFlushesThePendingWrite() async throws {
+        // 動かして 1 秒以内に閉じても消えない(設計書 4.2)。待たずに stop() を呼ぶ。
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.setYear(404)                      // writeDelay は既定の 1 秒のまま
+        await store.stop()
+        let text = try String(contentsOf: v.appendingPathComponent("世界.yaml"), encoding: .utf8)
+        #expect(text.contains("現在: 404"))
+    }
+
     @Test @MainActor func rapidYearChangesWriteOnlyTheLastOne() async throws {
         let v = try TestVault.copiedSample()
         let store = VaultStore(vault: v)

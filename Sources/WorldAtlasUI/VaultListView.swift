@@ -5,7 +5,7 @@ import WorldAtlasStore
 
 /// 起動時に出る窓。最近使った vault を並べ、開く・新規作成・一覧から外すができる。
 public struct VaultListView: View {
-    @AppStorage("recentVaults") private var stored: String = "[]"
+    @AppStorage(RecentVaults.storageKey) private var stored: String = "[]"
     @Environment(\.openWindow) private var openWindow
 
     @State private var picking = false

@@ -19,10 +19,25 @@ import Testing
 
     @Test func twentyPolitiesAreAllDistinguishable() {
         // 5 と 4 は互いに素なので、色と模様の組は 20 まで重ならない。
-        // 同じ周期にすると、六つ目で色も模様も 0 番と同じになる。
-        func pair(_ i: Int) -> String { "\(Palette.polity(i))/\(Palette.polityDash(i))" }
-        #expect(Set((0..<20).map(pair)).count == 20)
-        #expect(pair(20) == pair(0))   // 21 個目でようやく一周する
+        // **文字列にして比べない。**Color の description にはインスタンスごとの UUID が入るので、
+        // 五色が全部同じ値でも「別物」に見えてしまう。値で比べる。
+        for i in 0..<20 {
+            for j in (i + 1)..<20 {
+                #expect(!(Palette.polity(i) == Palette.polity(j)
+                          && Palette.polityDash(i) == Palette.polityDash(j)))
+            }
+        }
+        #expect(Palette.polity(20) == Palette.polity(0))        // 21 個目でようやく一周する
+        #expect(Palette.polityDash(20) == Palette.polityDash(0))
+    }
+
+    @Test func theFiveColoursAreAllDifferentValues() {
+        // 設計書 10 節は五色を検証器で選んだ値だと定めている。同じ値が混ざっていないこと。
+        for i in 0..<5 {
+            for j in (i + 1)..<5 {
+                #expect(Palette.polity(i) != Palette.polity(j))
+            }
+        }
     }
 
     @Test func negativeIndexIsSafe() {

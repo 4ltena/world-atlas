@@ -122,6 +122,12 @@ public final class VaultStore {
     }
 
     public func stop() async {
+        // 予約を取り消して、その場で書き切る。**窓が閉じると Task は空振りする**ので、
+        // 動かして 1 秒以内に閉じた年と尺がここを通らないと消える（設計書 4.2）。
+        yearWriteTask?.cancel()
+        scaleWriteTask?.cancel()
+        persistYear()
+        persistScale()
         await indexer?.stopWatching()
     }
 

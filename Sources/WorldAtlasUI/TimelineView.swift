@@ -35,7 +35,10 @@ struct TimelineView: View {
                                                    height: geo.size.height))
 
             canvas(rows: rows, layout: layout, transform: t, scrollY: scrollY,
-                   scrolls: scrolls, size: geo.size)
+                   scrolls: scrolls, size: geo.size,
+                   worldEnd: store.snapshot.extent.hi, calendar: store.calendar,
+                   showsRuleStripes: store.showsRuleStripes, polityIndices: store.polityIndices,
+                   year: store.displayedYear)
                 .contentShape(Rectangle())
                 .gesture(SimultaneousGesture(dragGesture(size: geo.size, layout: layout, scrolls: scrolls,
                                                          rowCount: rows.count),
@@ -73,7 +76,6 @@ struct TimelineView: View {
                 // 境目を掴んで変わった高さを覚えへ写す。畳んで開き直したときにこの高さで戻る。
                 .onChange(of: geo.size.height) { _, h in
                     store.setTimelineHeight(h)
-                    rowScroll = min(rowScroll, maxScroll(layout: layout, rowCount: rows.count, height: h))
                 }
                 .onChange(of: store.scaleRequest) { _, _ in consumeRequest(width: geo.size.width) }
                 .onChange(of: rows.count) { _, _ in rowScroll = 0 }
@@ -212,8 +214,10 @@ struct TimelineView: View {
         switch h {
         case let .row(path):
             guard let r = rows.first(where: { $0.path == path }) else { return nil }
-            let end = r.isPoint ? "" : "–\(r.to.map(c.short) ?? "現在")"
-            return "\(r.name)（\(r.category)）\(c.name) \(c.short(r.from))\(end) 年"
+            let head = "\(r.name)（\(r.category)）\(c.name) "
+            if r.isPoint { return head + "\(c.short(r.from)) 年" }
+            guard let to = r.to else { return head + "\(c.short(r.from)) 年から現在" }
+            return head + "\(c.short(r.from))–\(c.short(to)) 年"
         case let .mark(path, year):
             guard let r = rows.first(where: { $0.path == path }),
                   let m = r.marks.first(where: { $0.year == year }) else { return nil }
@@ -231,19 +235,20 @@ struct TimelineView: View {
 
     private func canvas(rows: [TimelineRow], layout: TimelineLayout,
                         transform t: TimelineTransform, scrollY: Double,
-                        scrolls: Bool, size: CGSize) -> some View {
+                        scrolls: Bool, size: CGSize,
+                        worldEnd: Int, calendar: CalendarDef,
+                        showsRuleStripes: Bool, polityIndices: [String: Int],
+                        year: Int) -> some View {
         Canvas { ctx, _ in
             let span = t.origin...(t.origin + t.years)
             let interval = TimelineTicks.interval(pxPerYear: t.pxPerYear)
-            // 帯の右端。年カーソルだけが 10 年先まで行ける（設計書 6 節）。
-            let worldEnd = store.snapshot.extent.hi
 
             // 目盛りの帯。流さない。
             for y in TimelineTicks.years(in: span, interval: interval) {
                 let x = t.x(of: Double(y))
                 ctx.stroke(Path { $0.move(to: CGPoint(x: x, y: 0)); $0.addLine(to: CGPoint(x: x, y: size.height)) },
                            with: .color(Palette.rule), lineWidth: 1)
-                ctx.draw(Text(store.calendar.format(y)).font(.caption2).foregroundColor(.secondary),
+                ctx.draw(Text(calendar.format(y)).font(.caption2).foregroundColor(.secondary),
                          at: CGPoint(x: x + 4, y: 11), anchor: .leading)
             }
 
@@ -267,11 +272,11 @@ struct TimelineView: View {
                 }
 
                 // 支配の色帯。帯の下に 2 ポイント。色だけに頼らず模様も変える（設計書 10 節）。
-                if store.showsRuleStripes {
+                if showsRuleStripes {
                     for rule in r.rules {
                         let a = t.x(of: Double(rule.from))
                         let b = t.x(of: Double(rule.to ?? worldEnd))
-                        let k = store.polityIndices[rule.polity] ?? 0
+                        let k = polityIndices[rule.polity] ?? 0
                         let y = top + h * 0.62 + 2
                         // 勢力が替わる位置に 1 ポイントの切れ目（設計書 8.6）。右端だけを削る。
                         // 両端を 1 ずつ削ると、隣り合う帯のあいだが 2 ポイント空く。
@@ -298,16 +303,17 @@ struct TimelineView: View {
                 for m in r.marks { diamond(rowsCtx, at: CGPoint(x: t.x(of: Double(m.year)), y: mid), filled: true) }
                 for a in r.renames { diamond(rowsCtx, at: CGPoint(x: t.x(of: Double(a.from)), y: mid), filled: false) }
 
-                // 名札は行が高いときだけ出す（設計書 8.6）。
-                if layout.showsLabels {
+                // 名札は行が高いときだけ出す（設計書 8.6）。**帯の左端が画面の外にあっても、
+                // 帯が見えている限り名札は出す。**寄せると x0 は大きな負の数になる。
+                if layout.showsLabels, x1 > 0, x0 < size.width {
                     rowsCtx.draw(Text(r.name).font(.caption).foregroundColor(.primary),
-                                 at: CGPoint(x: x0 + 6, y: mid), anchor: .leading)
+                                 at: CGPoint(x: max(x0 + 6, 6), y: mid), anchor: .leading)
                 }
             }
 
             // 年カーソル。いちばん上に描く。地色の縁を付けて、どの色帯の上でも線として読めるようにする
             // （朱は勢力の五色と近いことがあり、色の差では分けられない）。
-            let cx = t.x(of: Double(store.displayedYear))
+            let cx = t.x(of: Double(year))
             let line = Path { $0.move(to: CGPoint(x: cx, y: 0)); $0.addLine(to: CGPoint(x: cx, y: size.height)) }
             ctx.stroke(line, with: .color(Palette.ground), lineWidth: 3)
             ctx.stroke(line, with: .color(Palette.accent), lineWidth: 1)
