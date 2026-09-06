@@ -16,17 +16,16 @@ struct RailView: View {
                         .frame(width: 22, height: 22)
                         .padding(7)
                         .foregroundStyle(store.kind == k ? Palette.accent : Color.secondary)
-                        .background(store.kind == k ? Palette.accent.opacity(0.12) : Color.clear,
-                                    in: RoundedRectangle(cornerRadius: 6))
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help(k.rawValue)
                 .accessibilityLabel(k.rawValue)
+                .accessibilityAddTraits(store.kind == k ? [.isButton, .isSelected] : .isButton)
             }
             Spacer()
         }
         .frame(width: 48)
         .padding(.top, 8)
-        .background(.bar)
     }
 }

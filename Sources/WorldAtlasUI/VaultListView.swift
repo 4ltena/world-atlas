@@ -5,7 +5,7 @@ import WorldAtlasStore
 
 /// 起動時に出る窓。最近使った vault を並べ、開く・新規作成・一覧から外すができる。
 public struct VaultListView: View {
-    @AppStorage("recentVaults") private var stored: String = "[]"
+    @AppStorage(RecentVaults.storageKey) private var stored: String = "[]"
     @Environment(\.openWindow) private var openWindow
 
     @State private var picking = false
@@ -15,44 +15,27 @@ public struct VaultListView: View {
     @State private var newWorldName = ""
     @State private var newCalendarName = ""
     @State private var failure: String?
+    @State private var find = ""
 
     public init() {}
 
     private var recents: [RecentVault] { RecentVaults.decode(stored) }
 
-    public var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if recents.isEmpty {
-                ContentUnavailableView("まだ vault がありません", systemImage: "square.stack.3d.up",
-                                       description: Text("既に Markdown を書いたディレクトリを開くか、新しく作ります"))
-            } else {
-                List {
-                    ForEach(recents) { v in
-                        Button { open(v.url) } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(v.world).font(.headline)
-                                Text(v.path).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            // 一覧から外すだけで、ディレクトリは消さない（設計書 4.1）。
-                            Button("一覧から外す") { stored = RecentVaults.encode(RecentVaults.remove(recents, path: v.path)) }
-                        }
-                    }
-                }
-            }
-            Divider()
-            HStack {
-                Button("開く…") { pickingForNew = false; picking = true }
-                Button("新規作成…") { newWorldName = ""; newCalendarName = ""; creating = true }
-                Spacer()
-            }
-            .padding(12)
+    /// 世界名とパスの部分一致で絞る。一覧は上限 20 件なので、単純な走査でよい。
+    private var shown: [RecentVault] {
+        let q = find.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return recents }
+        return recents.filter {
+            $0.world.localizedCaseInsensitiveContains(q) || $0.path.localizedCaseInsensitiveContains(q)
         }
-        .frame(minWidth: 420, minHeight: 320)
+    }
+
+    public var body: some View {
+        HStack(spacing: 0) {
+            side
+            main
+        }
+        .frame(minWidth: 720, minHeight: 460)
         .fileImporter(isPresented: $picking, allowedContentTypes: [.folder]) { result in
             let forNew = pickingForNew
             pickingForNew = false
@@ -68,7 +51,102 @@ public struct VaultListView: View {
         }
     }
 
-    /// 先に世界の名前と基準暦の名前を尋ね、そのあとで置き場を選ぶ（設計書 4.1）。
+    /// 左の欄。上にアプリの印と名前と版、その下に行き先(いまは「世界」の一つだけ)。
+    /// 設定は Stage 6 なので、まだ無い行き先は置かない。
+    private var side: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 11) {
+                KindIcon(kind: .place)
+                    .stroke(style: StrokeStyle(lineWidth: 1.3, lineJoin: .round))
+                    .frame(width: 34, height: 34)
+                    .foregroundStyle(Palette.accent)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("world-atlas").font(.title3)
+                    Text("0.2.0").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.bottom, 26)
+
+            Text("世界")
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Palette.accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 5))
+                .foregroundStyle(Palette.accent)
+            Spacer()
+        }
+        .padding(14)
+        .frame(width: 232)
+        .background(Palette.sidebar)
+    }
+
+    private var main: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 14) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("vault を探す", text: $find)
+                        .textFieldStyle(.plain)
+                }
+                Spacer(minLength: 0)
+                Button("開く…") { pickingForNew = false; picking = true }
+                Button("新規作成…") { newWorldName = ""; newCalendarName = ""; creating = true }
+            }
+            .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 14)
+            Rectangle().fill(Palette.rule).frame(height: 1).padding(.horizontal, 20)
+
+            if shown.isEmpty {
+                ContentUnavailableView(
+                    recents.isEmpty ? "まだ vault がありません" : "見つかりません",
+                    systemImage: "square.stack.3d.up",
+                    description: Text(recents.isEmpty
+                        ? "既に Markdown を書いたディレクトリを開くか、新しく作ります"
+                        : "名前かパスの一部で探せます"))
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(shown) { row($0) }
+                    }
+                    .padding(12)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .background(Palette.ground)
+    }
+
+    /// 一覧の一行。左に色の四角、右に世界名・パス・件数と年の範囲を同じ左端で三段に積む
+    /// (設計書 4.1)。三段目は一度開いた vault にだけ出る。
+    private func row(_ v: RecentVault) -> some View {
+        Button { open(v.url) } label: {
+            HStack(alignment: .top, spacing: 13) {
+                Text(String(v.world.prefix(1)))
+                    .frame(width: 34, height: 34)
+                    .background(Palette.polity(RecentVaults.colorIndex(of: v.path, count: Palette.polityCount)),
+                                in: RoundedRectangle(cornerRadius: 6))
+                    .foregroundStyle(.black)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(v.world)
+                    Text(v.path).font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.head)
+                    if let n = v.nodes, let from = v.from, let to = v.to {
+                        Text("\(n) 件　\(from)–\(to) 年")
+                            .font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            // 一覧から外すだけで、ディレクトリは消さない(設計書 4.1)。
+            Button("一覧から外す") { stored = RecentVaults.encode(RecentVaults.remove(recents, path: v.path)) }
+        }
+    }
+
+    /// 先に世界の名前と基準暦の名前を尋ね、そのあとで置き場を選ぶ(設計書 4.1)。
     private var newVaultSheet: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("新しい世界").font(.headline)

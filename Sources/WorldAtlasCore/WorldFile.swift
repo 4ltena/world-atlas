@@ -7,10 +7,16 @@ public struct CalendarDef: Equatable, Sendable, Codable {
     public var offset: Int
     public init(name: String, offset: Int) { self.name = name; self.offset = offset }
 
+    /// この暦での年を、暦名も「年」も付けずに返す。期間や一覧など、暦名を一度しか
+    /// 出したくない場所で使う。0 以下は「前 n」。
+    public func short(_ baseYear: Int) -> String {
+        let v = baseYear + offset
+        return v > 0 ? "\(v)" : "前 \(1 - v)"
+    }
+
     /// 基準暦の年をこの暦で表す。0 以下は「前 n 年」。
     public func format(_ baseYear: Int) -> String {
-        let v = baseYear + offset
-        return v > 0 ? "\(name) \(v) 年" : "\(name)前 \(1 - v) 年"
+        "\(name)\(baseYear + offset > 0 ? " " : "")\(short(baseYear)) 年"
     }
 }
 

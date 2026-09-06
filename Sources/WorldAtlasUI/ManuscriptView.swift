@@ -24,10 +24,11 @@ struct ManuscriptView: View {
                         .font(.caption).foregroundStyle(Palette.warning)
                 }
             }
-            .padding(8)
-            Divider()
+            .padding(10)
+            Rectangle().fill(Palette.rule).frame(height: 1)
             if store.showsRawEffectively { raw } else { rendered }
         }
+        .background(Palette.ground)
     }
 
     private var raw: some View {
@@ -36,8 +37,10 @@ struct ManuscriptView: View {
                 .font(.system(.body, design: .monospaced))
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(16)
+                .padding(.horizontal, 40)
+                .padding(.vertical, 32)
         }
+        .background(Palette.ground)
     }
 
     @ViewBuilder private var rendered: some View {
@@ -55,9 +58,10 @@ struct ManuscriptView: View {
             }
             .tint(Palette.accent)
             .textSelection(.enabled)
-            .frame(maxWidth: 680, alignment: .leading)
+            .frame(maxWidth: 620, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .topLeading)
-            .padding(24)
+            .padding(.horizontal, 40)
+            .padding(.vertical, 32)
         }
     }
 
@@ -88,7 +92,7 @@ struct ManuscriptView: View {
                 chip("種別", h.category)
                 ForEach(h.chips) { chip($0.label, $0.value) }
             }
-            Divider()
+            Rectangle().fill(Palette.rule).frame(height: 1).padding(.top, 4)
         }
     }
 
@@ -98,9 +102,9 @@ struct ManuscriptView: View {
             Text(value)
         }
         .font(.caption)
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 9)
         .padding(.vertical, 3)
-        .background(.quaternary, in: Capsule())
+        .background(Palette.veil, in: Capsule())
     }
 
     @ViewBuilder private func block(_ b: RenderedBlock) -> some View {
@@ -119,7 +123,7 @@ struct ManuscriptView: View {
                 }
             }
         case .paragraph:
-            Text(b.lines[0]).lineSpacing(4)
+            Text(b.lines[0]).lineSpacing(7)
         }
     }
 }

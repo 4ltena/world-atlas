@@ -52,6 +52,17 @@ import Testing
         #expect(CalendarDef(name: "聖暦", offset: -96).format(97) == "聖暦 1 年")
     }
 
+    @Test func formatsYearsWithoutTheCalendarName() {
+        let imperial = CalendarDef(name: "帝国暦", offset: 0)
+        #expect(imperial.short(500) == "500")
+        #expect(imperial.short(0) == "前 1")
+        #expect(imperial.short(-4) == "前 5")
+        // 加算値のある暦でも、format と同じ年を指す。
+        let sea = CalendarDef(name: "海都暦", offset: 178)
+        #expect(sea.short(318) == "496")
+        #expect(sea.format(318) == "海都暦 496 年")
+    }
+
     @Test func baseCalendarMustBeListed() {
         #expect(throws: FrontMatterError(line: nil, message: "基準暦 が 暦 の一覧にありません")) {
             try WorldFile.parse("名前: x\n基準暦: 王暦\n暦:\n  - [帝国暦, 0]\n現在: 1\n")
