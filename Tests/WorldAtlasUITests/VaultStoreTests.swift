@@ -529,6 +529,47 @@ import WorldAtlasCore
         #expect(!store.changedOutside)           // 印は下りる
     }
 
+    @Test @MainActor func aDeletedNodeKeepsTheSelectionWhileTheEditIsUnsaved() async throws {
+        // **外で消されても、抱えている編集は捨てない。**⌘S で書き戻せる場所に留める。
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText += "\nこちらの編集。"
+        let url = v.appendingPathComponent("場所/鉄鎚亭.md")
+        try FileManager.default.removeItem(at: url)
+        await store.reindexForTest([url])
+        #expect(store.selected == "場所/鉄鎚亭.md")     // **選択を保つ**
+        #expect(store.isDirty)
+        #expect(store.changedOutside)
+        #expect(store.editedText.hasSuffix("こちらの編集。"))
+        #expect(store.canEdit)                         // 読み込みは失敗しているが直せる
+        // ⌘S で消えた場所へ書き戻せる。それが利用者の望む復旧である。
+        #expect(store.save())
+        #expect(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @Test @MainActor func aDeletedNodeWithNothingUnsavedDropsTheDraftToo() async throws {
+        // 保存した直後に外で消される経路。**`save()` は綺麗な下書きを残すので、ここへ来る。**
+        // 選択だけ外して下書きを残すと、画面は概要なのに ⌘S が旧節点へ書く。
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText += "\nこちらの編集。"
+        #expect(store.save())
+        #expect(!store.isDirty)
+        #expect(store.draft != nil)                    // 綺麗な下書きが残っている
+        let url = v.appendingPathComponent("場所/鉄鎚亭.md")
+        try FileManager.default.removeItem(at: url)
+        await store.reindexForTest([url])
+        #expect(store.selected == nil)                 // 概要へ戻る
+        #expect(store.draft == nil)                    // **下書きも一緒に捨てる**
+        #expect(!store.changedOutside)
+    }
+
     /// 条件が成り立つまで、間を置いて確かめる。監視は非同期なので待ちが要る。
     @MainActor
     private func until(_ limit: Duration = .seconds(5), _ cond: () -> Bool) async throws {
