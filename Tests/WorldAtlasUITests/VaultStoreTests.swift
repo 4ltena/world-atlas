@@ -509,6 +509,28 @@ import WorldAtlasCore
         #expect(!store.changedOutside)      // **偽の警告を出さない**
     }
 
+    @Test @MainActor func aDeletedNodeStillHasItsKindCheckedOnSave() async throws {
+        // 型は**パスの先頭**から引く。索引から引くと、外で消えた節点では型が nil になり、
+        // `validate(kind: nil)` が 世界.md 扱いで素通しする——壊れた front matter のまま
+        // 消えた場所へ書き戻せてしまう。
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        // 先に編集しておく。編集を抱えていないと、消えた節点は読み込みに失敗した扱いで
+        // 下書きが作れない（課題 2 の守り）——保存の検証まで届かない。
+        store.editedText += "\nこちらの編集。"
+        let url = v.appendingPathComponent("場所/鉄鎚亭.md")
+        try FileManager.default.removeItem(at: url)
+        await store.reindexForTest([url])
+        store.editedText = "front matter を消してしまった。"
+        #expect(!store.save())                                          // **書かない**
+        #expect(!FileManager.default.fileExists(atPath: url.path))      // 作り直してもいない
+        let reason = try #require(store.saveError)
+        #expect(reason.hasPrefix("1 行目"))
+    }
+
     @Test @MainActor func savingAfterAnOutsideChangeOverwritesIt() async throws {
         // 設計書 8.3。⌘S はそのまま上書きする。
         let v = try TestVault.copiedSample()
