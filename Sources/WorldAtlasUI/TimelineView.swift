@@ -43,6 +43,13 @@ struct TimelineView: View {
                 .gesture(SimultaneousGesture(dragGesture(size: geo.size, layout: layout, scrolls: scrolls,
                                                          rowCount: rows.count),
                                              pinchGesture(size: geo.size)))
+                // 二本指の横スワイプとホイール（設計書 8.6）。掴みやピンチの最中は受けない。
+                .modifier(ScrollPanReader(frame: geo.frame(in: .global)) { dx in
+                    guard interaction == nil else { return }
+                    let base = store.scale
+                        ?? .whole(width: geo.size.width, limits: store.snapshot.extent)
+                    store.setScale(base.panned(byX: dx, limits: store.snapshot.extent))
+                })
                 .onContinuousHover { phase in
                     switch phase {
                     case let .active(p):
@@ -248,7 +255,8 @@ struct TimelineView: View {
                 let x = t.x(of: Double(y))
                 ctx.stroke(Path { $0.move(to: CGPoint(x: x, y: 0)); $0.addLine(to: CGPoint(x: x, y: size.height)) },
                            with: .color(Palette.rule), lineWidth: 1)
-                ctx.draw(Text(calendar.format(y)).font(.caption2).foregroundColor(.secondary),
+                // 暦名は年ゲージの行に一度だけ出る。目盛りには数だけを置く。
+                ctx.draw(Text(calendar.short(y)).font(.caption2).foregroundColor(.secondary),
                          at: CGPoint(x: x + 4, y: 11), anchor: .leading)
             }
 
