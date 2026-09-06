@@ -43,6 +43,13 @@ struct TimelineView: View {
                 .gesture(SimultaneousGesture(dragGesture(size: geo.size, layout: layout, scrolls: scrolls,
                                                          rowCount: rows.count),
                                              pinchGesture(size: geo.size)))
+                // 二本指の横スワイプとホイール（設計書 8.6）。掴みやピンチの最中は受けない。
+                .modifier(ScrollPanReader(frame: geo.frame(in: .global)) { dx in
+                    guard interaction == nil else { return }
+                    let base = store.scale
+                        ?? .whole(width: geo.size.width, limits: store.snapshot.extent)
+                    store.setScale(base.panned(byX: dx, limits: store.snapshot.extent))
+                })
                 .onContinuousHover { phase in
                     switch phase {
                     case let .active(p):
@@ -140,7 +147,10 @@ struct TimelineView: View {
                 switch interaction {
                 case .year:
                     let e = store.snapshot.extent
-                    store.draggingYear = min(max(Int(base.year(atX: v.location.x).rounded()), e.lo), e.hi + 10)
+                    let y = min(max(Int(base.year(atX: v.location.x).rounded()), e.lo), e.hi + 10)
+                    // **同じ年への代入を落とす。**呼び名は draggingYear で解いているので、
+                    // 毎フレーム書き換えると木と原稿が動かないのに組み直される。
+                    if store.draggingYear != y { store.draggingYear = y }
                 case .rows:
                     let limit = maxScroll(layout: layout, rowCount: rowCount, height: size.height)
                     rowScroll = min(max(scrollBase - v.translation.height, 0), limit)
@@ -248,7 +258,8 @@ struct TimelineView: View {
                 let x = t.x(of: Double(y))
                 ctx.stroke(Path { $0.move(to: CGPoint(x: x, y: 0)); $0.addLine(to: CGPoint(x: x, y: size.height)) },
                            with: .color(Palette.rule), lineWidth: 1)
-                ctx.draw(Text(calendar.format(y)).font(.caption2).foregroundColor(.secondary),
+                // 暦名は年ゲージの行に一度だけ出る。目盛りには数だけを置く。
+                ctx.draw(Text(calendar.short(y)).font(.caption2).foregroundColor(.secondary),
                          at: CGPoint(x: x + 4, y: 11), anchor: .leading)
             }
 

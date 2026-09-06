@@ -50,13 +50,18 @@ public final class VaultStore {
     }
 
     /// 66 件ほどの vault を前提に、その都度組み直す（設計書 15 節、千を超える規模は対象外）。
-    public var rows: [TreeNode] { Tree.build(snapshot, kind: kind, year: year, query: query) }
+    ///
+    /// **呼び名は `displayedYear` で解く。**年カーソルを掴んでいる最中も追随する（設計書 8.6）。
+    /// 掴んでいる間は据え置く案を先に採ったが、2026-09-06 の実機確認で、動かしながら
+    /// 名前が変わるほうが読み取れると判った。`draggingYear` は年が実際に変わったときだけ
+    /// 書き換わる（`TimelineView` が同じ値の代入を落とす）ので、組み直しは 1 年に一度である。
+    public var rows: [TreeNode] { Tree.build(snapshot, kind: kind, year: displayedYear, query: query) }
 
     public var header: Header? {
-        selected.flatMap { Manuscript.header(snapshot, path: $0, year: year, calendar: calendar) }
+        selected.flatMap { Manuscript.header(snapshot, path: $0, year: displayedYear, calendar: calendar) }
     }
 
-    public var blocks: [RenderedBlock] { BodyRenderer.render(text, snapshot: snapshot, year: year) }
+    public var blocks: [RenderedBlock] { BodyRenderer.render(text, snapshot: snapshot, year: displayedYear) }
 
     /// 開いている節点が壊れているか。
     public var isBroken: Bool {
@@ -160,7 +165,7 @@ public final class VaultStore {
     public var showsRuleStripes = true
 
     public var timelineRows: [TimelineRow] {
-        Timeline.rows(snapshot, selected: selected, kind: kind, year: year)
+        Timeline.rows(snapshot, selected: selected, kind: kind, year: displayedYear)
     }
     public var polityIndices: [String: Int] { Timeline.polityIndices(snapshot) }
 
@@ -185,7 +190,7 @@ public final class VaultStore {
     /// 年表の根と、いま見えている範囲と、それが世界に占める割合を出す。
     /// 尺がまだ決まっていない（索引前）ときは根だけを出す。
     public var timelineSubtitle: String {
-        let root = selected.flatMap { snapshot.nodes[$0]?.displayName(at: year) } ?? kind.rawValue
+        let root = selected.flatMap { snapshot.nodes[$0]?.displayName(at: displayedYear) } ?? kind.rawValue
         guard let t = scale else { return "根 \(root)" }
         let lo = Int(t.origin.rounded()), hi = Int((t.origin + t.years).rounded())
         let e = snapshot.extent
