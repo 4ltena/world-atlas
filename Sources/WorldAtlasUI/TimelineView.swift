@@ -147,7 +147,10 @@ struct TimelineView: View {
                 switch interaction {
                 case .year:
                     let e = store.snapshot.extent
-                    store.draggingYear = min(max(Int(base.year(atX: v.location.x).rounded()), e.lo), e.hi + 10)
+                    let y = min(max(Int(base.year(atX: v.location.x).rounded()), e.lo), e.hi + 10)
+                    // **同じ年への代入を落とす。**呼び名は draggingYear で解いているので、
+                    // 毎フレーム書き換えると木と原稿が動かないのに組み直される。
+                    if store.draggingYear != y { store.draggingYear = y }
                 case .rows:
                     let limit = maxScroll(layout: layout, rowCount: rowCount, height: size.height)
                     rowScroll = min(max(scrollBase - v.translation.height, 0), limit)

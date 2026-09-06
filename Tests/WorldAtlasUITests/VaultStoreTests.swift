@@ -307,8 +307,8 @@ import WorldAtlasCore
         #expect(store.timelineRows.first?.isRoot == true)
     }
 
-    @Test @MainActor func draggingTheYearDoesNotMoveTheTreeUntilItIsReleased() async throws {
-        // 設計書 8.6。掴んでいる間は年の読みだけが追随し、木と本文は離すまで動かない。
+    @Test @MainActor func draggingTheYearMovesTheTreeAtOnce() async throws {
+        // 設計書 8.6（2026-09-06 に改めた）。掴んでいる最中から呼び名が追随する。
         // 木は入れ子なので、探す前に平らにする。
         func flatten(_ ns: [TreeNode]) -> [TreeNode] { ns.flatMap { [$0] + flatten($0.children) } }
         let store = VaultStore(vault: try TestVault.copiedSample())
@@ -320,10 +320,15 @@ import WorldAtlasCore
         #expect(eldenName() == "王都エルデン")      // 318 年からの呼び名
         store.draggingYear = 600
         #expect(store.displayedYear == 600)
-        #expect(eldenName() == "王都エルデン")      // 掴んでいる間は変わらない
+        #expect(eldenName() == "エルデン市")        // **掴んでいる最中から変わる**
         store.setYear(600)
         store.draggingYear = nil
-        #expect(eldenName() == "エルデン市")        // 離すと切り替わる
+        #expect(eldenName() == "エルデン市")        // 離しても同じ
+        // 掴みを捨てた（離さずに取り消した）ら、確定した年の呼び名へ戻る。
+        store.draggingYear = 200
+        #expect(eldenName() == "エルデン邑")
+        store.draggingYear = nil
+        #expect(eldenName() == "エルデン市")
     }
 
     @Test @MainActor func collapsingRemembersTheHeight() async throws {
