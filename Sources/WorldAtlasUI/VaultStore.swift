@@ -63,6 +63,55 @@ public final class VaultStore {
 
     public var blocks: [RenderedBlock] { BodyRenderer.render(text, snapshot: snapshot, year: displayedYear) }
 
+    // MARK: 編集（設計書 8.3）
+
+    /// 未保存の編集。原文の欄が触っているあいだだけ在る。
+    public private(set) var draft: Draft?
+    /// `raw` を書いたときの token。`textToken` と一致していれば、読み込みが済んでいる。
+    /// **-1 で始める。**0 で始めると、`load()` が索引を作っている最中——`raw` がまだ空の
+    /// うち——に `isTextLoaded` が真になり、空から下書きを作れてしまう。そのまま保存すると
+    /// **既に書いてある 世界.md を、打った分だけで置き換える。**
+    private var loadedTextToken = -1
+    /// 保存できなかった理由。行番号つきで欄の上に出す。
+    public private(set) var saveError: String?
+    /// 編集中の節点のファイルが外で書き換わった印。
+    public private(set) var changedOutside = false
+
+    /// 未保存の変更があるか。移動の関門はこれを見る。
+    public var isDirty: Bool { draft?.isDirty ?? false }
+
+    /// 保存できる状態か。**`save()` が実際に書く条件と同じものを使う。**
+    /// 外の変更を知らせているあいだは、文字列が基準と同じでも上書きさせる——
+    /// 帯が「⌘S で上書きします」と言っているのに ⌘S が押せない、という食い違いを避ける。
+    public var canSave: Bool { isDirty || changedOutside }
+
+    /// `raw` が今の選択の原文になっているか。**読み込みは非同期なので、選び直した直後は偽になる。**
+    public var isTextLoaded: Bool { loadedTextToken == textToken }
+
+    /// 原文の欄を触れるか。**下書きを抱えているなら、読み込みが失敗しても触れる。**
+    /// 外でファイルが消された後に、壊れた front matter を直して書き戻す経路がここを通る。
+    /// 触れなくすると、⌘S は検証で落ち、直す手段も無くなって行き止まりになる。
+    public var canEdit: Bool { isTextLoaded || draft != nil }
+
+    /// 原文の欄が読み書きする口。下書きがまだ無ければ、その場で始める。
+    public var editedText: String {
+        get { draft?.text ?? raw }
+        set {
+            beginDraftIfNeeded()
+            draft?.text = newValue
+        }
+    }
+
+    /// 下書きを今の原文から始める。既に在れば何もしない。
+    ///
+    /// **読み込みが済むまで始めない。**`select(_:)` は `selected` を同期で変えるが、`raw` の
+    /// 更新は `Task` の中である。その隙に打つと `Draft(path: 移動先, base: 移動元の原文)` が
+    /// できあがり、**同じ型なら検証も通って、移動先の原稿を移動元の内容で上書きする。**
+    public func beginDraftIfNeeded() {
+        guard draft == nil, isTextLoaded else { return }
+        draft = Draft(path: selected, base: raw)
+    }
+
     /// 開いている節点が壊れているか。
     public var isBroken: Bool {
         selected.flatMap { snapshot.nodes[$0]?.flags.contains(.broken) } ?? false
@@ -107,6 +156,10 @@ public final class VaultStore {
             kind = n.kind
             reveal(path)
         }
+        // 移った先の原文で始め直す。未保存のまま移る経路は課題 5 で塞ぐ。
+        draft = nil
+        saveError = nil
+        changedOutside = false
         selected = path
         var st = VaultState.read(vault: vault)
         st.openNode = path
@@ -365,13 +418,22 @@ public final class VaultStore {
                 failure = "このファイルは UTF-8 として読めません。"
             }
         } else if target == nil {
-            loaded = (try? String(contentsOf: vault.appendingPathComponent("世界.md"), encoding: .utf8)) ?? ""
+            let url = vault.appendingPathComponent("世界.md")
+            // 無ければ空でよい。まだ書いていないだけである（設計書 4.1）。
+            // **読めないのは別である。**空と扱うと、打って保存した時点で元の中身が消える。
+            if FileManager.default.fileExists(atPath: url.path) {
+                do { loaded = try String(contentsOf: url, encoding: .utf8) }
+                catch { failure = "世界.md が UTF-8 として読めません。" }
+            }
             whole = loaded
         }
         guard token == textToken else { return }
         text = loaded
         raw = whole
         textError = failure
+        // **読めなかったときは「読み込み済み」にしない。**読めない原稿を空欄と勘違いして
+        // 打ち直し、保存で元のファイルを潰す——という経路をここで塞ぐ。
+        if failure == nil { loadedTextToken = token }
     }
 
     private func describe(_ error: Error) -> String {

@@ -32,15 +32,37 @@ struct ManuscriptView: View {
     }
 
     private var raw: some View {
-        ScrollView {
-            Text(store.raw)
+        VStack(spacing: 0) {
+            if let e = store.saveError { notice(e) }
+            if store.changedOutside {
+                notice("外で変更あり。⌘S を押すと、いまここにある内容で上書きします。")
+            }
+            TextEditor(text: Binding(get: { store.editedText },
+                                     set: { store.editedText = $0 }))
+                // 読み込みが済むまで打たせない。**選び直した直後の一瞬に打つと、
+                // 移動先の原稿を移動元の内容で上書きしてしまう。**
+                // ただし下書きを抱えているなら触れる（外で消された節点を直して書き戻す）。
+                .disabled(!store.canEdit)
                 .font(.system(.body, design: .monospaced))
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .scrollContentBackground(.hidden)
                 .padding(.horizontal, 40)
                 .padding(.vertical, 32)
         }
         .background(Palette.ground)
+    }
+
+    /// 編集欄の上に出す一行。保存の失敗と外の変更の両方がここへ出る（設計書 8.3）。
+    private func notice(_ text: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+            Text(text)
+            Spacer(minLength: 0)
+        }
+        .font(.caption)
+        .foregroundStyle(Palette.warning)
+        .padding(.horizontal, 40)
+        .padding(.vertical, 8)
+        .background(Palette.veil)
     }
 
     @ViewBuilder private var rendered: some View {
