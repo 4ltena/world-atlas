@@ -55,8 +55,14 @@ public struct VaultWindow: View {
             }
         }
         .confirmationDialog("保存していない変更があります",
+                            // **消すのは三つのボタンだけ。**閉じる側の setter で
+                            // `passageCancel()` を呼ぶと、保存に失敗して意図的に残した
+                            // 問いまで消える(設計書 8.3 は出し直せと言っている)。さらに
+                            // SwiftUI は setter とボタンの動作の順序を約束しないので、先に
+                            // 消えると「保存せず移る」が編集を捨てたまま移動しない。
+                            // Esc は role: .cancel のボタンを呼ぶので、そちらで消える。
                             isPresented: Binding(get: { store.pendingPassage != nil },
-                                                 set: { if !$0 { store.passageCancel() } }),
+                                                 set: { _ in }),
                             titleVisibility: .visible) {
             Button("保存して移る") { store.passageSaveAndGo() }
             Button("保存せず移る", role: .destructive) { store.passageDiscardAndGo() }
