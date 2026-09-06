@@ -121,6 +121,49 @@ public final class VaultStore {
     /// （設計書 4.4）。front matter が YAML として読めない以上、表示に出せる本文が無い。
     public var showsRawEffectively: Bool { isBroken || showsRaw }
 
+    /// 保存する（設計書 8.3）。front matter を検証し、通ればファイルへ書く。
+    /// 通らなければ**書かず**、行番号つきの理由を欄の上に出す。
+    /// 戻り値は書けたかどうかで、移動の関門（課題 5）がこれを見る。
+    @discardableResult
+    public func save() -> Bool {
+        guard let d = draft, canSave else {
+            saveError = nil
+            return true          // 書くものが無い。移ってよい
+        }
+        // 型は**パスの先頭**から引く。索引から引くと、外でファイルが消えたときに型が
+        // nil になり、`validate(kind: nil)` が 世界.md 扱いで検証を素通しする——
+        // 壊れた front matter のまま元のパスへ書き戻せてしまう。
+        // 世界.md（path が nil）だけが front matter を持たない。
+        let kind = d.path.flatMap { Kind(rawValue: String($0.prefix(while: { $0 != "/" }))) }
+        if let e = d.validate(kind: kind) {
+            saveError = e.line.map { "\($0) 行目: \(e.message)" } ?? e.message
+            return false
+        }
+        // path は vault からの相対。Indexer.fileURL(of:) と同じ組み立てで、actor を待たない。
+        let url = d.path.map { vault.appendingPathComponent($0) }
+            ?? vault.appendingPathComponent("世界.md")
+        do {
+            try d.text.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            // 書けない理由は system の言葉で来る。日本語だけの規則を守るため、こちらで言う。
+            saveError = "書き込めません。ファイルの権限と空き容量を確かめてください。"
+            return false
+        }
+        saveError = nil
+        changedOutside = false
+        draft = d.saved()
+        raw = d.text
+        // 監視が拾うのを待たず、その場で索引し直す。木と年表がすぐ追いつく。
+        if d.path != nil {
+            Task { [weak self] in
+                guard let ix = self?.indexer else { return }
+                guard let s = try? await ix.reindex([url]) else { return }
+                self?.apply(s)
+            }
+        }
+        return true
+    }
+
     // MARK: 動かすもの
 
     public func load() async {

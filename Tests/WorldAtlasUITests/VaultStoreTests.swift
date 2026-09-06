@@ -384,6 +384,79 @@ import WorldAtlasCore
         #expect(saved.visibleTo == 500)
     }
 
+    @Test @MainActor func savingWritesTheFileAndReindexes() async throws {
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText = store.editedText.replacingOccurrences(of: "種別: 宿", with: "種別: 旅籠")
+        #expect(store.isDirty)
+        #expect(store.save())
+        // ファイルに書かれている。
+        let text = try String(contentsOf: v.appendingPathComponent("場所/鉄鎚亭.md"), encoding: .utf8)
+        #expect(text.contains("種別: 旅籠"))
+        // 索引にも入っている。
+        try await until { store.snapshot.nodes["場所/鉄鎚亭.md"]?.category == "旅籠" }
+        #expect(!store.isDirty)
+        #expect(store.saveError == nil)
+    }
+
+    @Test @MainActor func abrokenFrontMatterIsNotWritten() async throws {
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        let before = try String(contentsOf: v.appendingPathComponent("場所/鉄鎚亭.md"), encoding: .utf8)
+        store.editedText = "front matter を消してしまった。"
+        #expect(!store.save())
+        // **書いていない。**
+        let after = try String(contentsOf: v.appendingPathComponent("場所/鉄鎚亭.md"), encoding: .utf8)
+        #expect(after == before)
+        // 行番号つきの理由が出ている。
+        let reason = try #require(store.saveError)
+        #expect(reason.hasPrefix("1 行目"))
+        #expect(store.isDirty)          // 編集は残っている
+    }
+
+    @Test @MainActor func fixingTheErrorAndSavingAgainClearsTheReason() async throws {
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        let sound = store.editedText
+        store.editedText = "壊した。"
+        #expect(!store.save())
+        #expect(store.saveError != nil)
+        store.editedText = sound + "\n直した。"
+        #expect(store.save())
+        #expect(store.saveError == nil)
+    }
+
+    @Test @MainActor func savingWithNothingChangedDoesNothingAndSucceeds() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        #expect(!store.isDirty)
+        #expect(store.save())          // 何も書かずに通る
+        #expect(store.saveError == nil)
+    }
+
+    @Test @MainActor func theWorldFileCanBeEditedAndSaved() async throws {
+        // 何も選んでいないときは 世界.md を編集している。front matter は無い。
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.select(nil)
+        store.editedText = "灰海は塩と鉄の海である。"
+        #expect(store.save())
+        let text = try String(contentsOf: v.appendingPathComponent("世界.md"), encoding: .utf8)
+        #expect(text == "灰海は塩と鉄の海である。")
+    }
+
     /// 条件が成り立つまで、間を置いて確かめる。監視は非同期なので待ちが要る。
     @MainActor
     private func until(_ limit: Duration = .seconds(5), _ cond: () -> Bool) async throws {
