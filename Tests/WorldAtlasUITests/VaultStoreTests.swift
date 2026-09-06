@@ -457,6 +457,78 @@ import WorldAtlasCore
         #expect(text == "灰海は塩と鉄の海である。")
     }
 
+    @Test @MainActor func anOutsideChangeIsTakenWhenNotEditing() async throws {
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        // 外のエディタが書き換えた体で、直に書いて索引し直す。
+        let url = v.appendingPathComponent("場所/鉄鎚亭.md")
+        let outside = try String(contentsOf: url, encoding: .utf8) + "\n外で足した。"
+        try outside.write(to: url, atomically: true, encoding: .utf8)
+        await store.reindexForTest([url])
+        #expect(store.raw.hasSuffix("外で足した。"))
+        #expect(!store.changedOutside)      // 編集していないので知らせることは無い
+        #expect(!store.isDirty)
+    }
+
+    @Test @MainActor func anOutsideChangeIsHeldBackWhileEditing() async throws {
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText = store.editedText + "\nこちらの編集。"
+        let url = v.appendingPathComponent("場所/鉄鎚亭.md")
+        let outside = try String(contentsOf: url, encoding: .utf8) + "\n外で足した。"
+        try outside.write(to: url, atomically: true, encoding: .utf8)
+        await store.reindexForTest([url])
+        // **編集中の文字列を守る。**
+        #expect(store.editedText.hasSuffix("こちらの編集。"))
+        #expect(store.isDirty)
+        #expect(store.changedOutside)       // 印だけ立つ
+    }
+
+    @Test @MainActor func movingTheYearDoesNotLookLikeAnOutsideChange() async throws {
+        // 年を動かすと 世界.yaml が書かれ、監視が全体を索引し直す（設計書 4.2）。
+        // 節点のファイルは変わっていないので、偽の警告を出してはいけない。
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText = store.editedText + "\nこちらの編集。"
+        store.writeDelay = .milliseconds(20)
+        store.setYear(404)
+        try await until { (try? String(contentsOf: v.appendingPathComponent("世界.yaml"), encoding: .utf8))?
+                            .contains("現在: 404") == true }
+        await store.rebuildForTest()
+        #expect(store.editedText.hasSuffix("こちらの編集。"))
+        #expect(store.isDirty)
+        #expect(!store.changedOutside)      // **偽の警告を出さない**
+    }
+
+    @Test @MainActor func savingAfterAnOutsideChangeOverwritesIt() async throws {
+        // 設計書 8.3。⌘S はそのまま上書きする。
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText = store.editedText.replacingOccurrences(of: "種別: 宿", with: "種別: 旅籠")
+        let url = v.appendingPathComponent("場所/鉄鎚亭.md")
+        try (try String(contentsOf: url, encoding: .utf8) + "\n外で足した。")
+            .write(to: url, atomically: true, encoding: .utf8)
+        await store.reindexForTest([url])
+        #expect(store.changedOutside)
+        #expect(store.save())
+        let text = try String(contentsOf: url, encoding: .utf8)
+        #expect(text.contains("種別: 旅籠"))
+        #expect(!text.contains("外で足した。"))   // こちらの内容で上書きした
+        #expect(!store.changedOutside)           // 印は下りる
+    }
+
     /// 条件が成り立つまで、間を置いて確かめる。監視は非同期なので待ちが要る。
     @MainActor
     private func until(_ limit: Duration = .seconds(5), _ cond: () -> Bool) async throws {

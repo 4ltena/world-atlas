@@ -424,10 +424,45 @@ public final class VaultStore {
         d.set(RecentVaults.encode(out), forKey: RecentVaults.storageKey)
     }
 
+    /// 試験のための入口。監視は FSEvents で待ち時間が読めないので、その場で索引し直す。
+    /// **製品の経路では使わない。**監視と `save()` が同じ `apply(_:)` を通る。
+    ///
+    /// **本文の読み直しまで待ってから戻る。**`apply(_:)` は読み直しを別の `Task` に
+    /// 予約するので、そのまま戻ると試験は `raw` や `changedOutside` を古いまま検べる。
+    /// 正しい実装でも落ちる試験になり、監視が先回りしたときだけ通るような結果にもなる。
+    func reindexForTest(_ files: [URL]) async {
+        guard let ix = indexer, let s = try? await ix.reindex(files) else { return }
+        apply(s)
+        await reloadText(token: textToken, target: selected)
+    }
+
+    /// 同じく試験のための入口。全体を索引し直す。
+    func rebuildForTest() async {
+        guard let ix = indexer, let s = try? await ix.rebuild() else { return }
+        apply(s)
+        await reloadText(token: textToken, target: selected)
+    }
+
     private func apply(_ s: Snapshot) {
         snapshot = s
         // 開いていた節点が消えたら、概要へ戻す。
-        if let p = selected, s.nodes[p] == nil { selected = nil }
+        // **ただし未保存の編集を抱えているときは選択を保つ。**選択だけ外すと、下書きは
+        // 消えた節点のものなのに画面は概要になり、⌘S が画面に見えない場所へ書く。
+        // 抱えたままなら、⌘S でその場所へ書き戻せる——それが利用者の望む復旧である。
+        //
+        // **下書きは常に今の選択のものである。**この不変条件を破ると、編集文字列と
+        // 保存先が食い違う。選択を外すときは、汚れていない下書きも一緒に捨てる——
+        // `save()` は綺麗な下書きを残すので、保存した直後に外で消されるとここへ来る。
+        if let p = selected, s.nodes[p] == nil {
+            if draft?.path == p, isDirty {
+                changedOutside = true
+            } else {
+                selected = nil
+                draft = nil
+                saveError = nil
+                changedOutside = false
+            }
+        }
         textToken += 1
         let token = textToken
         let target = selected
@@ -477,6 +512,14 @@ public final class VaultStore {
         // **読めなかったときは「読み込み済み」にしない。**読めない原稿を空欄と勘違いして
         // 打ち直し、保存で元のファイルを潰す——という経路をここで塞ぐ。
         if failure == nil { loadedTextToken = token }
+        // 編集中なら、その節点のファイルの中身そのものと基準を比べる（設計書 8.3）。
+        // **索引が走ったこと自体を「外で変わった」と読まない。**年を動かすと 世界.yaml が
+        // 書かれて全体の索引が走るので、それを外の変更と数えると警告が出続ける。
+        if let d = draft, d.path == target {
+            let (next, outside) = d.merging(external: whole)
+            draft = next
+            if outside { changedOutside = true }
+        }
     }
 
     private func describe(_ error: Error) -> String {
