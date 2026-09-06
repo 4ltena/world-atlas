@@ -92,7 +92,7 @@ struct ManuscriptView: View {
             HStack(spacing: 4) {
                 ForEach(Array(h.crumbs.enumerated()), id: \.element.id) { i, c in
                     if i > 0 { Text("›").foregroundStyle(.tertiary) }
-                    Button(c.name) { store.select(c.path) }
+                    Button(c.name) { store.requestSelect(c.path) }
                         .buttonStyle(.plain)
                         .foregroundStyle(i == h.crumbs.count - 1 ? Color.primary : Color.secondary)
                 }

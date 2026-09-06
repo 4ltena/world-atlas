@@ -164,6 +164,51 @@ public final class VaultStore {
         return true
     }
 
+    /// 未保存のまま移ろうとしたときの行き先（設計書 8.3、2026-09-06 の利用者の判断）。
+    /// 答えを受け取ってから実行するので、行き先を覚えておく。
+    public enum Passage: Equatable, Sendable {
+        case node(String?)
+        case closeWindow
+    }
+    /// 問いかけ中の行き先。nil ならダイアログは出ていない。
+    public private(set) var pendingPassage: Passage?
+
+    /// 節点を選ぶ。**移動の経路はすべてここを通す。**未保存なら尋ねる。
+    public func requestSelect(_ path: String?) {
+        guard path != selected else { return }
+        guard isDirty else { return select(path) }
+        pendingPassage = .node(path)
+    }
+
+    /// 「保存して移る」。**通らなければ移らず、問いを残す。**
+    public func passageSaveAndGo() {
+        guard save() else { return }
+        commitPassage()
+    }
+
+    /// 「保存せず移る」。**編集を捨てる。取り消せない。**
+    public func passageDiscardAndGo() {
+        draft = nil
+        saveError = nil
+        changedOutside = false
+        commitPassage()
+    }
+
+    /// 「やめる」。編集も選択もそのまま。
+    public func passageCancel() { pendingPassage = nil }
+
+    private func commitPassage() {
+        guard let p = pendingPassage else { return }
+        pendingPassage = nil
+        switch p {
+        case let .node(path): select(path)
+        case .closeWindow: closeAfterPassage()      // 課題 6
+        }
+    }
+
+    /// 課題 6 で窓を閉じる。ここではまだ何もしない。
+    func closeAfterPassage() {}
+
     // MARK: 動かすもの
 
     public func load() async {
@@ -192,7 +237,8 @@ public final class VaultStore {
         }
     }
 
-    public func select(_ path: String?) {
+    /// 関門を抜けた後にだけ呼ぶ。**外からは `requestSelect(_:)` を使う。**
+    func select(_ path: String?) {
         guard path != selected else { return }
         if let path {
             guard let n = snapshot.nodes[path] else { return }
@@ -219,7 +265,7 @@ public final class VaultStore {
 
     public func goToParent() {
         guard let p = selected, let pp = snapshot.nodes[p]?.parentPath else { return }
-        select(pp)
+        requestSelect(pp)
     }
 
     public func stop() async {

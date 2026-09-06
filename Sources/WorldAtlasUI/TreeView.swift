@@ -77,7 +77,7 @@ struct TreeRow: View {
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture { store.select(node.path) }
+        .onTapGesture { store.requestSelect(node.path) }
         .accessibilityAddTraits(store.selected == node.path ? [.isButton, .isSelected] : .isButton)
         .listRowBackground(rowBackground)
     }

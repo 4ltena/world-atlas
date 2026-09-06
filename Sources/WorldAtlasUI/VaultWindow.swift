@@ -46,13 +46,23 @@ public struct VaultWindow: View {
         .environment(\.openURL, OpenURLAction { url in
             // 自分のスキームは必ず自分で受ける。解決先が無ければ何もしない。
             guard let path = NodeURL.path(from: url) else { return .systemAction }
-            if store.snapshot.nodes[path] != nil { store.select(path) }
+            if store.snapshot.nodes[path] != nil { store.requestSelect(path) }
             return .handled
         })
         .overlay {
             if let e = store.loadError {
                 ContentUnavailableView("この vault を読めません", systemImage: "exclamationmark.triangle", description: Text(e))
             }
+        }
+        .confirmationDialog("保存していない変更があります",
+                            isPresented: Binding(get: { store.pendingPassage != nil },
+                                                 set: { if !$0 { store.passageCancel() } }),
+                            titleVisibility: .visible) {
+            Button("保存して移る") { store.passageSaveAndGo() }
+            Button("保存せず移る", role: .destructive) { store.passageDiscardAndGo() }
+            Button("やめる", role: .cancel) { store.passageCancel() }
+        } message: {
+            Text("「保存せず移る」を選ぶと、いまの編集は失われます。")
         }
     }
 }

@@ -592,6 +592,97 @@ import WorldAtlasCore
         #expect(!store.changedOutside)
     }
 
+    @Test @MainActor func movingWithNothingUnsavedGoesStraightThrough() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.requestSelect("場所/鉄鎚亭.md")
+        #expect(store.selected == "場所/鉄鎚亭.md")
+        #expect(store.pendingPassage == nil)
+    }
+
+    @Test @MainActor func movingWithUnsavedWorkAsksFirst() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText += "\nこちらの編集。"
+        store.requestSelect("場所/職人街.md")
+        #expect(store.pendingPassage == .node("場所/職人街.md"))
+        #expect(store.selected == "場所/鉄鎚亭.md")     // まだ移っていない
+    }
+
+    @Test @MainActor func savingAndGoingMovesAndKeepsTheEdit() async throws {
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText += "\nこちらの編集。"
+        store.requestSelect("場所/職人街.md")
+        store.passageSaveAndGo()
+        #expect(store.selected == "場所/職人街.md")
+        #expect(store.pendingPassage == nil)
+        let text = try String(contentsOf: v.appendingPathComponent("場所/鉄鎚亭.md"), encoding: .utf8)
+        #expect(text.hasSuffix("こちらの編集。"))
+    }
+
+    @Test @MainActor func savingAndGoingStaysPutWhenTheSaveFails() async throws {
+        // **通らなければ移らず、問いを出し直す。**
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText = "front matter を壊した。"
+        store.requestSelect("場所/職人街.md")
+        store.passageSaveAndGo()
+        #expect(store.selected == "場所/鉄鎚亭.md")
+        #expect(store.pendingPassage == .node("場所/職人街.md"))   // 問いは残る
+        #expect(store.saveError != nil)
+        #expect(store.isDirty)
+    }
+
+    @Test @MainActor func discardingThrowsTheEditAwayAndMoves() async throws {
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        let before = try String(contentsOf: v.appendingPathComponent("場所/鉄鎚亭.md"), encoding: .utf8)
+        store.editedText += "\nこちらの編集。"
+        store.requestSelect("場所/職人街.md")
+        store.passageDiscardAndGo()
+        #expect(store.selected == "場所/職人街.md")
+        #expect(store.pendingPassage == nil)
+        #expect(!store.isDirty)
+        let after = try String(contentsOf: v.appendingPathComponent("場所/鉄鎚亭.md"), encoding: .utf8)
+        #expect(after == before)          // ファイルは触っていない
+    }
+
+    @Test @MainActor func cancellingKeepsEverything() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText += "\nこちらの編集。"
+        store.requestSelect("場所/職人街.md")
+        store.passageCancel()
+        #expect(store.selected == "場所/鉄鎚亭.md")
+        #expect(store.pendingPassage == nil)
+        #expect(store.isDirty)
+        #expect(store.editedText.hasSuffix("こちらの編集。"))
+    }
+
+    @Test @MainActor func goingToTheParentPassesThroughTheSameGate() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText += "\nこちらの編集。"
+        store.goToParent()
+        #expect(store.pendingPassage == .node("場所/職人街.md"))
+        #expect(store.selected == "場所/鉄鎚亭.md")
+    }
+
     /// 条件が成り立つまで、間を置いて確かめる。監視は非同期なので待ちが要る。
     @MainActor
     private func until(_ limit: Duration = .seconds(5), _ cond: () -> Bool) async throws {
