@@ -16,8 +16,10 @@ import WorldAtlasCore
         let path = try NodeCreator.create(in: v, kind: .place, name: "塩蔵通り", year: 500)
         #expect(path == "場所/塩蔵通り.md")
         let text = try String(contentsOf: v.appendingPathComponent(path), encoding: .utf8)
-        // 平文で書ける名前は引用されない。引用の要否は WorldFile.scalar が決める。
-        #expect(text.contains("名前: 塩蔵通り"))
+        // 名前の引用の要否は WorldFile.scalar が決める。ここでは解析後の値で比べ、
+        // 引用してもしなくても正しい実装であれば通るようにする。
+        let node = try FrontMatter.parse(text, kind: .place)
+        #expect(node.name == "塩蔵通り")
         #expect(text.contains("種別: 場所"))
         #expect(text.contains("期間: [500, 現在]"))
     }
@@ -51,11 +53,16 @@ import WorldAtlasCore
     }
 
     @Test func theSameFileIsRefused() throws {
+        // 断るだけでなく、既にある中身が置き換わっていないことまで確かめる。
+        // ここが競合の窓を閉じたかどうかの実質である。
         let v = try tempVault()
-        _ = try NodeCreator.create(in: v, kind: .place, name: "塩蔵通り", year: 500)
+        let path = try NodeCreator.create(in: v, kind: .place, name: "塩蔵通り", year: 500)
+        let before = try String(contentsOf: v.appendingPathComponent(path), encoding: .utf8)
         #expect(throws: NodeCreator.Failure.self) {
-            try NodeCreator.create(in: v, kind: .place, name: "塩蔵通り", year: 500)
+            try NodeCreator.create(in: v, kind: .place, name: "塩蔵通り", year: 999)
         }
+        let after = try String(contentsOf: v.appendingPathComponent(path), encoding: .utf8)
+        #expect(after == before)
     }
 
     @Test func theSameNameInAnotherKindIsAllowed() throws {

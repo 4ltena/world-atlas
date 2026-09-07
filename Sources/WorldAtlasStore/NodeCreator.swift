@@ -23,9 +23,6 @@ public enum NodeCreator {
         let dir = vault.appendingPathComponent(kind.rawValue)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent("\(trimmed).md")
-        guard !FileManager.default.fileExists(atPath: url.path) else {
-            throw Failure(message: "同じ名前のファイルが既にあります。別の名前にしてください。")
-        }
         // 型ごとに期間の鍵が違う。ここを間違えると必ず壊れた節点になる(設計書 4.3)。
         let period: String
         switch kind {
@@ -44,7 +41,15 @@ public enum NodeCreator {
         ---
 
         """
-        try body.write(to: url, atomically: true, encoding: .utf8)
+        // 確認してから書くと、その間に同じファイルができたとき中身を置き換えてしまう。
+        // withoutOverwriting は書き込み自身に拒否させるので、その隙間が無い。
+        // atomic と組み合わせない——atomic は一時ファイル経由で置き換えるので、
+        // 断りたいことをやってしまう。
+        do {
+            try Data(body.utf8).write(to: url, options: .withoutOverwriting)
+        } catch CocoaError.fileWriteFileExists {
+            throw Failure(message: "同じ名前のファイルが既にあります。別の名前にしてください。")
+        }
         return "\(kind.rawValue)/\(trimmed).md"
     }
 }

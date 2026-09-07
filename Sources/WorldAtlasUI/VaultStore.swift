@@ -69,6 +69,10 @@ public final class VaultStore {
     public var creating = false
     /// 作れなかった理由。入力欄の中に出す。
     public private(set) var creationError: String?
+    /// 作った節点の path。索引へ載って選べるようになったら原文表示にする——
+    /// 関門の前で `showsRaw` へ直接立てると、移動を取り消したときに元の節点の
+    /// 表示モードまで変わってしまう(select(_:) は関門を通った後にしか動かない)。
+    private var showsRawOnArrival: String?
 
     /// 節点を作って原文で開く(設計書 8.3)。**未保存の編集があるときは関門を通す。**
     @discardableResult
@@ -79,11 +83,20 @@ public final class VaultStore {
             creating = false
             // 索引へ載せてから開く。載る前に選ぶと「消えた節点」として弾かれる。
             let url = vault.appendingPathComponent(path)
+            showsRawOnArrival = path
             Task { [weak self] in
-                guard let ix = self?.indexer, let s = try? await ix.reindex([url]) else { return }
-                self?.apply(s)
-                self?.showsRaw = true          // 作った直後は原文で開く
-                self?.requestSelect(path)
+                guard let self else { return }
+                guard let ix = self.indexer else { return }
+                do {
+                    let s = try await ix.reindex([url])
+                    self.apply(s)
+                    self.requestSelect(path)
+                } catch {
+                    // ファイルはもうできている。「作れなかった」と言うと、同じ名前で
+                    // もう一度作ろうとして「既にあります」に当たる。
+                    self.showsRawOnArrival = nil
+                    self.creationError = "作りましたが、開けませんでした。木から選び直してください。"
+                }
             }
             return true
         } catch let e as NodeCreator.Failure {
@@ -285,6 +298,12 @@ public final class VaultStore {
             guard let n = snapshot.nodes[path] else { return }
             kind = n.kind
             reveal(path)
+            // 作った節点に実際に着いたときだけ原文表示にする(設計書 8.3)。関門の前で
+            // 立てると、移動を取り消しても元の節点の表示モードが変わってしまう。
+            if path == showsRawOnArrival {
+                showsRaw = true
+                showsRawOnArrival = nil
+            }
         }
         // 移った先の原文で始め直す。未保存のまま移る経路は課題 5 で塞ぐ。
         draft = nil
