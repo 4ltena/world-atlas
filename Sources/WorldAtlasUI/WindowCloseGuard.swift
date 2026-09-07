@@ -30,9 +30,9 @@ struct WindowCloseGuard: NSViewRepresentable {
     final class Coordinator: NSObject, NSWindowDelegate {
         var shouldClose: () -> Bool
         /// もとの delegate。SwiftUI が差しているものを壊さないよう、知らない問いは渡す。
-        // `forwardingTarget(for:)` overrides a nonisolated NSObject method, so it can't
-        // be @MainActor even though this class is. AppKit only ever calls it on the
-        // main thread, so `nonisolated(unsafe)` here is safe in practice.
+        // `forwardingTarget(for:)` は `NSObject` の非隔離のメソッドを override するので、
+        // この型が @MainActor でも、そこからは @MainActor の値を読めない。AppKit は主スレッド
+        // からしか呼ばないため `nonisolated(unsafe)` で通す。
         nonisolated(unsafe) private weak var original: NSWindowDelegate?
         private weak var window: NSWindow?
 
@@ -49,8 +49,9 @@ struct WindowCloseGuard: NSViewRepresentable {
 
         func windowShouldClose(_ sender: NSWindow) -> Bool { shouldClose() }
 
-        /// 関門を抜けたので閉じる。`windowShouldClose` はもう一度呼ばれるが、
-        /// そのときは未保存の編集が無いので通る。
+        /// 関門を抜けたので閉じる。**`close()` は `windowShouldClose` を送らない**
+        /// （送るのは `performClose(_:)` のほう）。ここは既に承認を得た後なので、
+        /// 二度目の問いを挟まずにそのまま閉じるのが正しい。二重の守りだと読まないこと。
         func closeOwnWindow() { window?.close() }
 
         override func responds(to aSelector: Selector!) -> Bool {
