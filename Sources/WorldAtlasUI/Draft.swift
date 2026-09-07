@@ -46,6 +46,10 @@ public struct Draft: Equatable, Sendable {
     /// - 編集していれば**編集中の文字列を守り**、知らせる印だけを返す。
     public func merging(external: String) -> (draft: Draft, changedOutside: Bool) {
         guard external != base else { return (self, false) }
+        // **これは「まだ抱えていない」ときの正しさである。**呼ぶ側が既に外の変更を
+        // 抱えているなら、ここへ来てはいけない——利用者が文字列を基準へ戻しただけで
+        // 汚れが消え、書き戻すための旧本文を手放してしまう。`VaultStore.reloadText` が
+        // `changedOutside` を見て入口で止めている。
         guard isDirty else { return (Draft(path: path, base: external), false) }
         return (self, true)
     }

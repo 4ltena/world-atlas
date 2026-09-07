@@ -675,7 +675,12 @@ public final class VaultStore {
         // 「外がこう変わった」という中身ではない。ここを素通しすると、非UTF-8へ
         // 書き換えられた原稿が空の基準へ丸められ、下書きが汚れていなければ静かに
         // 空欄へ差し替わってしまう。
-        if failure == nil, let d = draft, d.path == target {
+        // **既に抱えているなら、比べ直さない。**`Draft.merging` は汚れていなければ
+        // 外の内容を採るが、それは「まだ抱えていない」ときの正しさである。抱えている
+        // 最中に利用者が文字列を基準へ戻すと汚れが消えるので、無関係な索引が走った
+        // だけで、書き戻すための旧本文が外の内容へ差し替わってしまう。
+        // 一度抱えたら、保存するか捨てるかを利用者が選ぶまで抱えたままにする。
+        if failure == nil, !changedOutside, let d = draft, d.path == target {
             let (next, outside) = d.merging(external: whole)
             draft = next
             if outside { changedOutside = true }

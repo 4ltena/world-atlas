@@ -660,6 +660,33 @@ import WorldAtlasCore
         #expect(store.pendingPassage == .closeWindow)
     }
 
+    @Test @MainActor func holdingAnOutsideChangeSurvivesAnUnrelatedReindex() async throws {
+        // 削除ではない、ふつうの外の変更を抱えている場合。**文字列を基準へ戻しても、
+        // 抱えていた旧本文を手放さない。**手放すと、⌘S で書き戻す当てが消える。
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        await store.stopWatchingForTest()   // 索引し直すのはこの試験だけ
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        let mine = store.editedText
+        store.editedText = mine + "\nこちらの編集。"
+        let url = v.appendingPathComponent("場所/鉄鎚亭.md")
+        try (mine + "\n外で足した。").write(to: url, atomically: true, encoding: .utf8)
+        await store.reindexForTest([url])
+        #expect(store.changedOutside)                       // 抱えた
+        store.editedText = mine                             // 基準へ戻す。汚れは消える
+        #expect(!store.isDirty)
+        // 無関係なファイルの変更で索引が走る。
+        await store.reindexForTest([v.appendingPathComponent("場所/職人街.md")])
+        #expect(store.editedText == mine)                   // **旧本文を手放していない**
+        #expect(store.changedOutside)                       // 抱えている印も残る
+        #expect(store.canSave)
+        // ⌘S で、こちらの内容を書き戻せる。それが抱えていた目的である。
+        #expect(store.save())
+        #expect(try String(contentsOf: url, encoding: .utf8) == mine)
+    }
+
     @Test @MainActor func aFailedReloadDoesNotOfferAnEmptyEditableDraft() async throws {
         // 世界.md が外で非UTF-8へ書き換わったとき、読み込みは失敗する。その空文字を
         // 「外の内容」として基準へ丸めてはいけない——綺麗な下書きだけで編集可能になり、
