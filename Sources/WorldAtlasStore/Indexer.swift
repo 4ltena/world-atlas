@@ -100,6 +100,10 @@ public actor Indexer {
         watcher = w
     }
 
+    // **流れが自分を強く持つので、`watcher` を捨てるだけでは deinit が走らない。**
+    // ここで明示的に止めないと、監視が生きたまま残る（VaultWatcher.start の注記）。
+    deinit { watcher?.stop() }
+
     public func stopWatching() {
         watcher?.stop()
         watcher = nil

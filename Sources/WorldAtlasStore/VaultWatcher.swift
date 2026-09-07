@@ -47,7 +47,18 @@ public final class VaultWatcher: @unchecked Sendable {
 
     public func start() throws {
         guard stream == nil else { return }
-        var context = FSEventStreamContext(version: 0, info: Unmanaged.passUnretained(self).toOpaque(), retain: nil, release: nil, copyDescription: nil)
+        // **流れに自分を強く持たせる。**passUnretained だと、解放が始まったあとに、
+        // 既にキューへ積まれていたコールバックが `takeUnretainedValue()` で自分を掴み直す。
+        // 参照数が解放中に戻るので `deallocated with non-zero retain count` で落ちる——
+        // 並行して走る試験で実際に abort を観測した（Indexer の破棄 → VaultWatcher の
+        // deinit → swift_deallocClassInstance の致命エラー）。窓を閉じる経路も同じである。
+        // +1 は `stop()` の `FSEventStreamRelease` が解いて release で戻す。
+        var context = FSEventStreamContext(
+            version: 0,
+            info: Unmanaged.passRetained(self).toOpaque(),
+            retain: nil,
+            release: { Unmanaged<VaultWatcher>.fromOpaque($0!).release() },
+            copyDescription: nil)
         let paths = [resolvedVault] as CFArray
         let flags = FSEventStreamCreateFlags(kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagUseCFTypes | kFSEventStreamCreateFlagNoDefer)
         guard let s = FSEventStreamCreate(nil, VaultWatcher.callback, &context, paths, FSEventStreamEventId(kFSEventStreamEventIdSinceNow), latency, flags) else {
