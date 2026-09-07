@@ -627,8 +627,14 @@ import WorldAtlasCore
         #expect(store.editedText == "灰海は塩と鉄の海である。")
         // 書くものが無いと判定されるので、素の save() はディスクへ触れない。
         store.save()
-        let after = try Data(contentsOf: url)
-        #expect(after == corrupted)
+        #expect(try Data(contentsOf: url) == corrupted)
+        // **実害の経路はここである。**空欄が出たあと、利用者は打ってから ⌘S する。
+        // 打てば下書きが汚れ、`canSave` が真になり、読めなかったファイルが
+        // 打ち込んだ分だけで潰される。store 側で書き込み自体を断る。
+        store.editedText = "打ち直した。"
+        store.save()
+        #expect(try Data(contentsOf: url) == corrupted)   // 元のバイト列のまま
+        #expect(!store.isDirty)
     }
 
     @Test @MainActor func movingWithNothingUnsavedGoesStraightThrough() async throws {

@@ -153,6 +153,11 @@ public final class VaultStore {
     public var editedText: String {
         get { draft?.text ?? raw }
         set {
+            // **判断は store に置く。**欄を `disabled` にするのは見た目の話で、
+            // 綺麗な下書きが残ったまま読み込みに失敗した状態では、ここへ書けること
+            // 自体が穴である——書けば下書きが汚れ、`canSave` が真になり、⌘S が
+            // 読めなかったファイルを打ち込んだ分だけで潰す。
+            guard canEdit else { return }
             beginDraftIfNeeded()
             draft?.text = newValue
         }
