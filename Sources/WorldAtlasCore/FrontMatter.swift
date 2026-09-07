@@ -45,69 +45,91 @@ extension FrontMatter {
             throw FrontMatterError(line: 2, message: "front matter は 鍵: 値 の並びで書きます")
         }
         guard let name = dict["名前"] as? String, !name.isEmpty else {
-            throw FrontMatterError(line: nil, message: "名前 がありません")
+            throw FrontMatterError(line: line(of: "名前", in: split.yaml), message: "名前 がありません")
         }
         guard let category = dict["種別"] as? String, !category.isEmpty else {
-            throw FrontMatterError(line: nil, message: "種別 がありません")
+            throw FrontMatterError(line: line(of: "種別", in: split.yaml), message: "種別 がありません")
         }
         var node = Node(name: name, kind: kind, category: category, from: 0, to: nil)
         node.body = split.body
 
         // 効力 は 期間 の言い換えなので、両方あると意味が決まらない。黙って片方を採らない。
         guard dict["期間"] == nil || dict["効力"] == nil else {
-            throw FrontMatterError(line: nil, message: "期間 と 効力 は同じ意味です。どちらか一方だけ書きます")
+            throw FrontMatterError(line: line(of: "期間", in: split.yaml), message: "期間 と 効力 は同じ意味です。どちらか一方だけ書きます")
         }
         // 年 と 期間 も片方だけ。両方あると点の出来事か続くものかが決まらない。
         if dict["年"] != nil, let other = ["期間", "効力"].first(where: { dict[$0] != nil }) {
-            throw FrontMatterError(line: nil, message: "年 と \(other) は同時に書けません。どちらか一方だけ書きます")
+            throw FrontMatterError(line: line(of: "年", in: split.yaml), message: "年 と \(other) は同時に書けません。どちらか一方だけ書きます")
         }
         if let y = dict["年"] {
             guard let year = y as? Int else {
-                throw FrontMatterError(line: nil, message: "年 の値は整数で書きます")
+                throw FrontMatterError(line: line(of: "年", in: split.yaml), message: "年 の値は整数で書きます")
             }
             node.from = year; node.to = year; node.isPoint = true
         } else if let p = dict["期間"] ?? dict["効力"] {
             let key = dict["期間"] != nil ? "期間" : "効力"
             guard let pair = p as? [Any], pair.count == 2 else {
-                throw FrontMatterError(line: nil, message: "\(key) は [開始, 終了] の形で書きます")
+                throw FrontMatterError(line: line(of: key, in: split.yaml), message: "\(key) は [開始, 終了] の形で書きます")
             }
             guard let from = pair[0] as? Int, let to = yearOrPresent(pair[1]) else {
-                throw FrontMatterError(line: nil, message: "\(key) の値は整数か 現在 で書きます")
+                throw FrontMatterError(line: line(of: key, in: split.yaml), message: "\(key) の値は整数か 現在 で書きます")
             }
             node.from = from; node.to = to
         } else {
-            throw FrontMatterError(line: nil, message: "期間 か 年 のどちらかが要ります")
+            throw FrontMatterError(line: line(of: "期間", in: split.yaml), message: "期間 か 年 のどちらかが要ります")
         }
 
         if let a = dict["別名"] {
-            node.aliases = try list(a, key: "別名", arity: 2) { row in
+            node.aliases = try list(a, key: "別名", arity: 2,
+                                    line: line(of: "別名", in: split.yaml)) { row in
                 guard let from = row[0] as? Int, let n = row[1] as? String else { return nil }
                 return Alias(from: from, name: n)
             }
         }
         if let p = dict["親"] {
-            guard let parent = p as? String else { throw FrontMatterError(line: nil, message: "親 は保存名を一つ書きます") }
+            guard let parent = p as? String else {
+                throw FrontMatterError(line: line(of: "親", in: split.yaml), message: "親 は保存名を一つ書きます")
+            }
             node.parent = parent
         }
         if let r = dict["支配"] {
-            node.rules = try list(r, key: "支配", arity: 3) { row in
+            node.rules = try list(r, key: "支配", arity: 3,
+                                  line: line(of: "支配", in: split.yaml)) { row in
                 guard let from = row[0] as? Int, let to = yearOrPresent(row[1]), let pol = row[2] as? String else { return nil }
                 return Rule(from: from, to: to, polity: pol)
             }
         }
         if let l = dict["由来"] {
-            node.lineages = try list(l, key: "由来", arity: 3) { row in
+            node.lineages = try list(l, key: "由来", arity: 3,
+                                     line: line(of: "由来", in: split.yaml)) { row in
                 guard let y = row[0] as? Int, let k = row[1] as? String, let o = row[2] as? String else { return nil }
                 return Lineage(year: y, kind: k, origin: o)
             }
         }
         if let m = dict["出来事"] {
-            node.marks = try list(m, key: "出来事", arity: 2) { row in
+            node.marks = try list(m, key: "出来事", arity: 2,
+                                  line: line(of: "出来事", in: split.yaml)) { row in
                 guard let y = row[0] as? Int, let label = row[1] as? String else { return nil }
                 return Mark(year: y, label: label)
             }
         }
         return node
+    }
+
+    /// front matter の中でその鍵が書かれている行の、ファイル内の行番号（1 始まり）。
+    /// **誤りに行番号を添えるためだけに使う。**見つからなければ front matter の先頭を指す。
+    /// front matter は 1 行目の `---` の次から始まるので、`+ 2` する。
+    static func line(of key: String, in yaml: String) -> Int {
+        for (i, l) in yaml.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+            var t = l.drop { $0 == " " }
+            // 鍵は引用されていることがある（`"期間": 322`）。Yams は引用を外した鍵で
+            // 辞書を作るので、こちらも外して比べないと行が見つからず 2 行目を指してしまう。
+            if t.first == "\"" || t.first == "'" { t = t.dropFirst() }
+            guard t.hasPrefix(key) else { continue }
+            let rest = t.dropFirst(key.count).drop { $0 == "\"" || $0 == "'" }
+            if rest.first == ":" { return i + 2 }
+        }
+        return 2
     }
 
     /// `現在` なら nil、整数ならその値、それ以外は .none（失敗）。
@@ -118,14 +140,15 @@ extension FrontMatter {
         return nil
     }
 
-    private static func list<T>(_ v: Any, key: String, arity: Int, _ make: ([Any]) -> T?) throws(FrontMatterError) -> [T] {
+    private static func list<T>(_ v: Any, key: String, arity: Int, line: Int,
+                                _ make: ([Any]) -> T?) throws(FrontMatterError) -> [T] {
         guard let rows = v as? [Any] else {
-            throw FrontMatterError(line: nil, message: "\(key) は - [ ... ] の並びで書きます")
+            throw FrontMatterError(line: line, message: "\(key) は - [ ... ] の並びで書きます")
         }
         var out: [T] = []
         for row in rows {
             guard let r = row as? [Any], r.count == arity, let item = make(r) else {
-                throw FrontMatterError(line: nil, message: "\(key) の各行は \(arity) 個の値を [ ] で囲んで書きます")
+                throw FrontMatterError(line: line, message: "\(key) の各行は \(arity) 個の値を [ ] で囲んで書きます")
             }
             out.append(item)
         }

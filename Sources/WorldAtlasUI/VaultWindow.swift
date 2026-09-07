@@ -4,6 +4,7 @@ import WorldAtlasStore
 /// vault ひとつぶんの窓。上段に木と原稿、下段に年表を置く。
 public struct VaultWindow: View {
     @State private var store: VaultStore
+    @State private var newName = ""
 
     public init(vault: URL) {
         _store = State(initialValue: VaultStore(vault: vault))
@@ -41,18 +42,60 @@ public struct VaultWindow: View {
         .navigationTitle(store.snapshot.world.name.isEmpty ? "world-atlas" : store.snapshot.world.name)
         .navigationSubtitle(store.timelineSubtitle)
         .task { await store.load() }
-        .onDisappear { Task { await store.stop() } }
+        .onDisappear {
+            Task { await store.stop() }
+            OpenVaults.forget(store)
+        }
+        .background(WindowCloseGuard(shouldClose: { store.requestClose() },
+                                     wantsClose: store.wantsClose,
+                                     onWindow: { OpenVaults.register(store, window: $0) }))
         .focusedSceneValue(\.vaultStore, store)
         .environment(\.openURL, OpenURLAction { url in
             // 自分のスキームは必ず自分で受ける。解決先が無ければ何もしない。
             guard let path = NodeURL.path(from: url) else { return .systemAction }
-            if store.snapshot.nodes[path] != nil { store.select(path) }
+            if store.snapshot.nodes[path] != nil { store.requestSelect(path) }
             return .handled
         })
         .overlay {
             if let e = store.loadError {
                 ContentUnavailableView("この vault を読めません", systemImage: "exclamationmark.triangle", description: Text(e))
             }
+        }
+        .confirmationDialog("保存していない変更があります",
+                            // **消すのは三つのボタンだけ。**閉じる側の setter で
+                            // `passageCancel()` を呼ぶと、保存に失敗して意図的に残した
+                            // 問いまで消える(設計書 8.3 は出し直せと言っている)。さらに
+                            // SwiftUI は setter とボタンの動作の順序を約束しないので、先に
+                            // 消えると「保存せず移る」が編集を捨てたまま移動しない。
+                            // Esc は role: .cancel のボタンを呼ぶので、そちらで消える。
+                            isPresented: Binding(get: { store.pendingPassage != nil },
+                                                 set: { _ in }),
+                            titleVisibility: .visible) {
+            Button("保存して移る") { store.passageSaveAndGo() }
+            Button("保存せず移る", role: .destructive) { store.passageDiscardAndGo() }
+            Button("やめる", role: .cancel) { store.passageCancel() }
+        } message: {
+            Text("「保存せず移る」を選ぶと、いまの編集は失われます。")
+        }
+        .sheet(isPresented: Binding(get: { store.creating },
+                                    set: { store.creating = $0 })) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("新しい\(store.kind.rawValue)").font(.headline)
+                TextField("名前", text: $newName)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 260)
+                if let e = store.creationError {
+                    Text(e).font(.caption).foregroundStyle(Palette.warning)
+                }
+                HStack {
+                    Spacer()
+                    Button("やめる", role: .cancel) { store.cancelCreating(); newName = "" }
+                    Button("作る") { if store.createNode(named: newName) { newName = "" } }
+                        .keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding(20)
+            .background(Palette.ground)
         }
     }
 }

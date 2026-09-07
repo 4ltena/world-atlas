@@ -78,13 +78,13 @@ import Testing
     }
 
     @Test func periodAndEffectTogetherIsAnError() {
-        #expect(throws: FrontMatterError(line: nil, message: "期間 と 効力 は同じ意味です。どちらか一方だけ書きます")) {
+        #expect(throws: FrontMatterError(line: 4, message: "期間 と 効力 は同じ意味です。どちらか一方だけ書きます")) {
             try FrontMatter.parse("---\n名前: 鉄の掟\n種別: 法\n期間: [590, 現在]\n効力: [412, 596]\n---\n", kind: .law)
         }
     }
 
     @Test func yearAndPeriodTogetherIsAnError() {
-        #expect(throws: FrontMatterError(line: nil, message: "年 と 期間 は同時に書けません。どちらか一方だけ書きます")) {
+        #expect(throws: FrontMatterError(line: 4, message: "年 と 期間 は同時に書けません。どちらか一方だけ書きます")) {
             try FrontMatter.parse("---\n名前: 職人街の大火\n種別: 出来事\n年: 588\n期間: [588, 589]\n---\n", kind: .event)
         }
     }
@@ -95,19 +95,19 @@ import Testing
     }
 
     @Test func missingNameIsAnError() {
-        #expect(throws: FrontMatterError(line: nil, message: "名前 がありません")) {
+        #expect(throws: FrontMatterError(line: 2, message: "名前 がありません")) {
             try FrontMatter.parse("---\n種別: 区\n期間: [1, 2]\n---\n", kind: .place)
         }
     }
 
     @Test func missingPeriodAndYearIsAnError() {
-        #expect(throws: FrontMatterError(line: nil, message: "期間 か 年 のどちらかが要ります")) {
+        #expect(throws: FrontMatterError(line: 2, message: "期間 か 年 のどちらかが要ります")) {
             try FrontMatter.parse("---\n名前: x\n種別: 区\n---\n", kind: .place)
         }
     }
 
     @Test func nonIntegerYearIsAnError() {
-        #expect(throws: FrontMatterError(line: nil, message: "期間 の値は整数か 現在 で書きます")) {
+        #expect(throws: FrontMatterError(line: 4, message: "期間 の値は整数か 現在 で書きます")) {
             try FrontMatter.parse("---\n名前: x\n種別: 区\n期間: [いつか, 現在]\n---\n", kind: .place)
         }
     }
@@ -125,6 +125,58 @@ import Testing
     @Test func noFenceIsAnError() {
         #expect(throws: FrontMatterError(line: 1, message: "先頭に --- で囲んだ front matter が要ります")) {
             try FrontMatter.parse("名前: x\n", kind: .place)
+        }
+    }
+
+    @Test func aBrokenPeriodPointsAtItsOwnLine() throws {
+        let text = """
+        ---
+        名前: 鉄鎚亭
+        種別: 宿
+        期間: 322
+        ---
+        本文。
+        """
+        do {
+            _ = try FrontMatter.parse(text, kind: .place)
+            Issue.record("通ってはいけない")
+        } catch {
+            #expect(error.line == 4)          // 期間 の行
+            #expect(error.message.contains("期間"))
+        }
+    }
+
+    @Test func aMissingKeyPointsAtTheFrontMatter() throws {
+        // 鍵そのものが無いので、その行は存在しない。front matter の先頭を指す。
+        let text = """
+        ---
+        種別: 宿
+        期間: [322, 588]
+        ---
+        """
+        do {
+            _ = try FrontMatter.parse(text, kind: .place)
+            Issue.record("通ってはいけない")
+        } catch {
+            #expect(error.line == 2)
+            #expect(error.message.contains("名前"))
+        }
+    }
+
+    @Test func theParentKeyPointsAtItsOwnLine() throws {
+        let text = """
+        ---
+        名前: 鉄鎚亭
+        種別: 宿
+        期間: [322, 588]
+        親: [職人街]
+        ---
+        """
+        do {
+            _ = try FrontMatter.parse(text, kind: .place)
+            Issue.record("通ってはいけない")
+        } catch {
+            #expect(error.line == 5)
         }
     }
 }

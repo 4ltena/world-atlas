@@ -3,6 +3,8 @@ import WorldAtlasUI
 
 @main
 struct WorldAtlasMain: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+
     var body: some Scene {
         // 先に書いたほうが起動時に出る。
         Window("vault を選ぶ", id: "vaults") {

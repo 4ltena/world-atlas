@@ -23,6 +23,12 @@ struct TreeView: View {
             if let h = store.header {
                 Text(h.title).font(.headline)
                 Text(h.category).font(.caption).foregroundStyle(.secondary)
+            } else if let p = store.selected {
+                // 外で消された節点を、未保存の編集ごと抱えている間。保存先は選択のまま
+                // 変わっていないので、「選んでいません」は嘘になる。ファイル名だけ出す。
+                Text(((p as NSString).lastPathComponent as NSString).deletingPathExtension)
+                    .font(.headline)
+                Text("消えました").font(.caption).foregroundStyle(Palette.warning)
             } else {
                 Text("選んでいません").font(.caption).foregroundStyle(.secondary)
             }
@@ -33,8 +39,7 @@ struct TreeView: View {
     }
 
     private var empty: some View {
-        // 「⌘N で作る」の後半はStage 4 で作成ができるようになってから足す（設計書 14 節）。
-        Text(store.query.isEmpty ? "まだ項目が無い" : "該当なし")
+        Text(store.query.isEmpty ? "まだ項目が無い。⌘N で作る" : "該当なし")
             .font(.callout)
             .foregroundStyle(.secondary)
     }
@@ -77,7 +82,7 @@ struct TreeRow: View {
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture { store.select(node.path) }
+        .onTapGesture { store.requestSelect(node.path) }
         .accessibilityAddTraits(store.selected == node.path ? [.isButton, .isSelected] : .isButton)
         .listRowBackground(rowBackground)
     }

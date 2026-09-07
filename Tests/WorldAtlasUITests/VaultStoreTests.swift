@@ -384,14 +384,593 @@ import WorldAtlasCore
         #expect(saved.visibleTo == 500)
     }
 
-    /// 条件が成り立つまで、間を置いて確かめる。監視は非同期なので待ちが要る。
-    @MainActor
-    private func until(_ limit: Duration = .seconds(5), _ cond: () -> Bool) async throws {
-        let deadline = ContinuousClock.now + limit
-        while ContinuousClock.now < deadline {
-            if cond() { return }
-            try await Task.sleep(for: .milliseconds(50))
-        }
-        Issue.record("待ち時間 \(limit) の中で条件が成り立たなかった")
+    @Test @MainActor func savingWritesTheFileAndReindexes() async throws {
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText = store.editedText.replacingOccurrences(of: "種別: 宿", with: "種別: 旅籠")
+        #expect(store.isDirty)
+        #expect(store.save())
+        // ファイルに書かれている。
+        let text = try String(contentsOf: v.appendingPathComponent("場所/鉄鎚亭.md"), encoding: .utf8)
+        #expect(text.contains("種別: 旅籠"))
+        // 索引にも入っている。
+        try await until { store.snapshot.nodes["場所/鉄鎚亭.md"]?.category == "旅籠" }
+        #expect(!store.isDirty)
+        #expect(store.saveError == nil)
     }
+
+    @Test @MainActor func abrokenFrontMatterIsNotWritten() async throws {
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        let before = try String(contentsOf: v.appendingPathComponent("場所/鉄鎚亭.md"), encoding: .utf8)
+        store.editedText = "front matter を消してしまった。"
+        #expect(!store.save())
+        // **書いていない。**
+        let after = try String(contentsOf: v.appendingPathComponent("場所/鉄鎚亭.md"), encoding: .utf8)
+        #expect(after == before)
+        // 行番号つきの理由が出ている。
+        let reason = try #require(store.saveError)
+        #expect(reason.hasPrefix("1 行目"))
+        #expect(store.isDirty)          // 編集は残っている
+    }
+
+    @Test @MainActor func fixingTheErrorAndSavingAgainClearsTheReason() async throws {
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        let sound = store.editedText
+        store.editedText = "壊した。"
+        #expect(!store.save())
+        #expect(store.saveError != nil)
+        store.editedText = sound + "\n直した。"
+        #expect(store.save())
+        #expect(store.saveError == nil)
+    }
+
+    @Test @MainActor func savingWithNothingChangedDoesNothingAndSucceeds() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        #expect(!store.isDirty)
+        #expect(store.save())          // 何も書かずに通る
+        #expect(store.saveError == nil)
+    }
+
+    @Test @MainActor func theWorldFileCanBeEditedAndSaved() async throws {
+        // 何も選んでいないときは 世界.md を編集している。front matter は無い。
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.select(nil)
+        store.editedText = "灰海は塩と鉄の海である。"
+        #expect(store.save())
+        let text = try String(contentsOf: v.appendingPathComponent("世界.md"), encoding: .utf8)
+        #expect(text == "灰海は塩と鉄の海である。")
+    }
+
+    @Test @MainActor func anOutsideChangeIsTakenWhenNotEditing() async throws {
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        await store.stopWatchingForTest()   // 索引し直すのはこの試験だけ
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        // 外のエディタが書き換えた体で、直に書いて索引し直す。
+        let url = v.appendingPathComponent("場所/鉄鎚亭.md")
+        let outside = try String(contentsOf: url, encoding: .utf8) + "\n外で足した。"
+        try outside.write(to: url, atomically: true, encoding: .utf8)
+        await store.reindexForTest([url])
+        #expect(store.raw.hasSuffix("外で足した。"))
+        #expect(!store.changedOutside)      // 編集していないので知らせることは無い
+        #expect(!store.isDirty)
+    }
+
+    @Test @MainActor func anOutsideChangeIsHeldBackWhileEditing() async throws {
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        await store.stopWatchingForTest()   // 索引し直すのはこの試験だけ
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText = store.editedText + "\nこちらの編集。"
+        let url = v.appendingPathComponent("場所/鉄鎚亭.md")
+        let outside = try String(contentsOf: url, encoding: .utf8) + "\n外で足した。"
+        try outside.write(to: url, atomically: true, encoding: .utf8)
+        await store.reindexForTest([url])
+        // **編集中の文字列を守る。**
+        #expect(store.editedText.hasSuffix("こちらの編集。"))
+        #expect(store.isDirty)
+        #expect(store.changedOutside)       // 印だけ立つ
+    }
+
+    @Test @MainActor func movingTheYearDoesNotLookLikeAnOutsideChange() async throws {
+        // 年を動かすと 世界.yaml が書かれ、監視が全体を索引し直す（設計書 4.2）。
+        // 節点のファイルは変わっていないので、偽の警告を出してはいけない。
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        await store.stopWatchingForTest()   // 索引し直すのはこの試験だけ
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText = store.editedText + "\nこちらの編集。"
+        store.writeDelay = .milliseconds(20)
+        store.setYear(404)
+        try await until { (try? String(contentsOf: v.appendingPathComponent("世界.yaml"), encoding: .utf8))?
+                            .contains("現在: 404") == true }
+        await store.rebuildForTest()
+        #expect(store.editedText.hasSuffix("こちらの編集。"))
+        #expect(store.isDirty)
+        #expect(!store.changedOutside)      // **偽の警告を出さない**
+    }
+
+    @Test @MainActor func aDeletedNodeStillHasItsKindCheckedOnSave() async throws {
+        // 型は**パスの先頭**から引く。索引から引くと、外で消えた節点では型が nil になり、
+        // `validate(kind: nil)` が 世界.md 扱いで素通しする——壊れた front matter のまま
+        // 消えた場所へ書き戻せてしまう。
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        await store.stopWatchingForTest()   // 索引し直すのはこの試験だけ
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        // 先に編集しておく。編集を抱えていないと、消えた節点は読み込みに失敗した扱いで
+        // 下書きが作れない（課題 2 の守り）——保存の検証まで届かない。
+        store.editedText += "\nこちらの編集。"
+        let url = v.appendingPathComponent("場所/鉄鎚亭.md")
+        try FileManager.default.removeItem(at: url)
+        await store.reindexForTest([url])
+        store.editedText = "front matter を消してしまった。"
+        #expect(!store.save())                                          // **書かない**
+        #expect(!FileManager.default.fileExists(atPath: url.path))      // 作り直してもいない
+        let reason = try #require(store.saveError)
+        #expect(reason.hasPrefix("1 行目"))
+    }
+
+    @Test @MainActor func savingAfterAnOutsideChangeOverwritesIt() async throws {
+        // 設計書 8.3。⌘S はそのまま上書きする。
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        await store.stopWatchingForTest()   // 索引し直すのはこの試験だけ
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText = store.editedText.replacingOccurrences(of: "種別: 宿", with: "種別: 旅籠")
+        let url = v.appendingPathComponent("場所/鉄鎚亭.md")
+        try (try String(contentsOf: url, encoding: .utf8) + "\n外で足した。")
+            .write(to: url, atomically: true, encoding: .utf8)
+        await store.reindexForTest([url])
+        #expect(store.changedOutside)
+        #expect(store.save())
+        let text = try String(contentsOf: url, encoding: .utf8)
+        #expect(text.contains("種別: 旅籠"))
+        #expect(!text.contains("外で足した。"))   // こちらの内容で上書きした
+        #expect(!store.changedOutside)           // 印は下りる
+    }
+
+    @Test @MainActor func aDeletedNodeKeepsTheSelectionWhileTheEditIsUnsaved() async throws {
+        // **外で消されても、抱えている編集は捨てない。**⌘S で書き戻せる場所に留める。
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        await store.stopWatchingForTest()   // 索引し直すのはこの試験だけ
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText += "\nこちらの編集。"
+        let url = v.appendingPathComponent("場所/鉄鎚亭.md")
+        try FileManager.default.removeItem(at: url)
+        await store.reindexForTest([url])
+        #expect(store.selected == "場所/鉄鎚亭.md")     // **選択を保つ**
+        #expect(store.isDirty)
+        #expect(store.changedOutside)
+        #expect(store.editedText.hasSuffix("こちらの編集。"))
+        #expect(store.canEdit)                         // 読み込みは失敗しているが直せる
+        // ⌘S で消えた場所へ書き戻せる。それが利用者の望む復旧である。
+        #expect(store.save())
+        #expect(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @Test @MainActor func aDeletedNodeWithNothingUnsavedDropsTheDraftToo() async throws {
+        // 保存した直後に外で消される経路。**`save()` は綺麗な下書きを残すので、ここへ来る。**
+        // 選択だけ外して下書きを残すと、画面は概要なのに ⌘S が旧節点へ書く。
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        await store.stopWatchingForTest()   // 索引し直すのはこの試験だけ
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText += "\nこちらの編集。"
+        #expect(store.save())
+        #expect(!store.isDirty)
+        #expect(store.draft != nil)                    // 綺麗な下書きが残っている
+        let url = v.appendingPathComponent("場所/鉄鎚亭.md")
+        try FileManager.default.removeItem(at: url)
+        await store.reindexForTest([url])
+        #expect(store.selected == nil)                 // 概要へ戻る
+        #expect(store.draft == nil)                    // **下書きも一緒に捨てる**
+        #expect(!store.changedOutside)
+    }
+
+    @Test @MainActor func revertingTheTextAfterADeletionDoesNotLockTheEditor() async throws {
+        // レビューで見つかった経路: 壊れているが読める原稿を原文で開く → 一文字足す →
+        // 外で削除 → 足した一文字を消して基準へ戻す。基準へ戻った瞬間 isDirty は偽に
+        // なるが、消えた節点をわざと抱えている印（changedOutside）はそこでは下りない
+        // ——`save()` が書き終えるまで下りない。**`isDirty` だけを見ると、ここで
+        // 欄が閉じ、次の一打も setter に拒まれて行き止まりになる。**
+        let v = try TestVault.copiedSample()
+        try "---\n名前: 壊れ\n期間: これは年ではない\n---\n本文\n"
+            .write(to: v.appendingPathComponent("場所/壊れ.md"), atomically: true, encoding: .utf8)
+        let store = VaultStore(vault: v)
+        await store.load()
+        await store.stopWatchingForTest()   // 索引し直すのはこの試験だけ
+        store.select("場所/壊れ.md")
+        try await until { store.raw.contains("壊れ") }
+        #expect(store.isBroken)
+        let base = store.editedText
+        store.editedText = base + "x"
+        let url = v.appendingPathComponent("場所/壊れ.md")
+        try FileManager.default.removeItem(at: url)
+        await store.reindexForTest([url])
+        #expect(store.changedOutside)
+        #expect(store.canEdit)
+        // 足した一文字を消して、基準へ戻す。
+        store.editedText = base
+        #expect(!store.isDirty)
+        // **欄はここで閉じない。**行き止まりにしてはいけない。
+        #expect(store.canEdit)
+        // **基準へ戻したまま、別のファイルの変更で索引が走っても失わない。**
+        // 抱えている理由は「わざと抱えた」ことであって、いま汚れていることではない。
+        store.editedText = base
+        let other = v.appendingPathComponent("場所/職人街.md")
+        await store.reindexForTest([other])
+        #expect(store.selected == "場所/壊れ.md")   // 保存先を失っていない
+        #expect(store.draft != nil)                 // 復旧用の下書きも残っている
+        #expect(store.changedOutside)
+        #expect(store.canEdit)
+        // 次の一打も届く——setter が拒んでいない証拠。
+        store.editedText = base + "x"
+        #expect(store.editedText.hasSuffix("x"))
+        // front matter を直して、消えた場所へ書き戻す。それが復旧の目的である。
+        store.editedText = "---\n名前: 壊れ\n種別: 場所\n期間: [1, 現在]\n---\n直した。\n"
+        #expect(store.save())
+        #expect(FileManager.default.fileExists(atPath: url.path))
+        let saved = try String(contentsOf: url, encoding: .utf8)
+        #expect(saved.contains("直した"))
+    }
+
+    @Test @MainActor func leavingADeletedNodeStillAsksAfterTheTextIsReverted() async throws {
+        // **関門の述語は `canSave` である。**`isDirty` だけだと、消えた節点の唯一の写しを
+        // 黙って捨てて移ってしまう——⌘S が書くものを持っているなら、必ず尋ねる。
+        let store = try await storeHoldingADeletedNode(try TestVault.copiedSample())
+        #expect(!store.isDirty)
+        #expect(store.changedOutside)
+        store.requestSelect("場所/職人街.md")
+        #expect(store.pendingPassage == .node("場所/職人街.md"))   // 尋ねている
+        #expect(store.selected == "場所/壊れ.md")                  // まだ移っていない
+        store.passageCancel()
+        #expect(!store.requestClose())                            // 窓を閉じるときも尋ねる
+        #expect(store.pendingPassage == .closeWindow)
+    }
+
+    @Test @MainActor func holdingAnOutsideChangeSurvivesAnUnrelatedReindex() async throws {
+        // 削除ではない、ふつうの外の変更を抱えている場合。**文字列を基準へ戻しても、
+        // 抱えていた旧本文を手放さない。**手放すと、⌘S で書き戻す当てが消える。
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        await store.stopWatchingForTest()   // 索引し直すのはこの試験だけ
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        let mine = store.editedText
+        store.editedText = mine + "\nこちらの編集。"
+        let url = v.appendingPathComponent("場所/鉄鎚亭.md")
+        try (mine + "\n外で足した。").write(to: url, atomically: true, encoding: .utf8)
+        await store.reindexForTest([url])
+        #expect(store.changedOutside)                       // 抱えた
+        store.editedText = mine                             // 基準へ戻す。汚れは消える
+        #expect(!store.isDirty)
+        // 無関係なファイルの変更で索引が走る。
+        await store.reindexForTest([v.appendingPathComponent("場所/職人街.md")])
+        #expect(store.editedText == mine)                   // **旧本文を手放していない**
+        #expect(store.changedOutside)                       // 抱えている印も残る
+        #expect(store.canSave)
+        // ⌘S で、こちらの内容を書き戻せる。それが抱えていた目的である。
+        #expect(store.save())
+        #expect(try String(contentsOf: url, encoding: .utf8) == mine)
+    }
+
+    @Test @MainActor func aFailedReloadDoesNotOfferAnEmptyEditableDraft() async throws {
+        // 世界.md が外で非UTF-8へ書き換わったとき、読み込みは失敗する。その空文字を
+        // 「外の内容」として基準へ丸めてはいけない——綺麗な下書きだけで編集可能になり、
+        // 理由の出ないまま⌘Sが既存のファイルを打ち直した分だけで潰してしまう。
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        await store.stopWatchingForTest()
+        store.select(nil)
+        store.editedText = "灰海は塩と鉄の海である。"
+        #expect(store.save())
+        #expect(!store.isDirty)                        // 綺麗な下書きが残った
+        let url = v.appendingPathComponent("世界.md")
+        // 有効な UTF-8 として読めないバイト列で外から上書きする。
+        let corrupted = Data([0xFF, 0xFE, 0x00, 0x80])
+        try corrupted.write(to: url)
+        await store.rebuildForTest()
+        #expect(!store.canEdit)                        // 空欄を編集可能にしない
+        #expect(store.textError != nil)                // 読めなかった理由が立っている
+        // **下書きが空文字で置き換わっていない。**ここが「理由の出ない編集可能な空欄」の
+        // 実体である——`canEdit` が誤って真になるのも、下書きの中身が空にすり替わって
+        // いるからこそ起きる。UI は disabled にするが、`save()` は `canEdit` を見ない
+        // （`canSave` だけを見る）ので、disk 上のバイト列そのものでの検査は、素の
+        // `save()` 呼び出しだけでは常に無変化になり、この壊れを見分けられない
+        // （下書きは空文字どうしで綺麗なままなので、書くものが無いと判定される）。
+        #expect(store.editedText == "灰海は塩と鉄の海である。")
+        // 書くものが無いと判定されるので、素の save() はディスクへ触れない。
+        store.save()
+        #expect(try Data(contentsOf: url) == corrupted)
+        // **実害の経路はここである。**空欄が出たあと、利用者は打ってから ⌘S する。
+        // 打てば下書きが汚れ、`canSave` が真になり、読めなかったファイルが
+        // 打ち込んだ分だけで潰される。store 側で書き込み自体を断る。
+        store.editedText = "打ち直した。"
+        store.save()
+        #expect(try Data(contentsOf: url) == corrupted)   // 元のバイト列のまま
+        #expect(!store.isDirty)
+    }
+
+    @Test @MainActor func movingWithNothingUnsavedGoesStraightThrough() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.requestSelect("場所/鉄鎚亭.md")
+        #expect(store.selected == "場所/鉄鎚亭.md")
+        #expect(store.pendingPassage == nil)
+    }
+
+    @Test @MainActor func movingWithUnsavedWorkAsksFirst() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText += "\nこちらの編集。"
+        store.requestSelect("場所/職人街.md")
+        #expect(store.pendingPassage == .node("場所/職人街.md"))
+        #expect(store.selected == "場所/鉄鎚亭.md")     // まだ移っていない
+    }
+
+    @Test @MainActor func savingAndGoingMovesAndKeepsTheEdit() async throws {
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText += "\nこちらの編集。"
+        store.requestSelect("場所/職人街.md")
+        store.passageSaveAndGo()
+        #expect(store.selected == "場所/職人街.md")
+        #expect(store.pendingPassage == nil)
+        let text = try String(contentsOf: v.appendingPathComponent("場所/鉄鎚亭.md"), encoding: .utf8)
+        #expect(text.hasSuffix("こちらの編集。"))
+    }
+
+    @Test @MainActor func savingAndGoingStaysPutWhenTheSaveFails() async throws {
+        // **通らなければ移らず、問いを出し直す。**
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText = "front matter を壊した。"
+        store.requestSelect("場所/職人街.md")
+        store.passageSaveAndGo()
+        #expect(store.selected == "場所/鉄鎚亭.md")
+        #expect(store.pendingPassage == .node("場所/職人街.md"))   // 問いは残る
+        #expect(store.saveError != nil)
+        #expect(store.isDirty)
+    }
+
+    @Test @MainActor func discardingThrowsTheEditAwayAndMoves() async throws {
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        let before = try String(contentsOf: v.appendingPathComponent("場所/鉄鎚亭.md"), encoding: .utf8)
+        store.editedText += "\nこちらの編集。"
+        store.requestSelect("場所/職人街.md")
+        store.passageDiscardAndGo()
+        #expect(store.selected == "場所/職人街.md")
+        #expect(store.pendingPassage == nil)
+        #expect(!store.isDirty)
+        let after = try String(contentsOf: v.appendingPathComponent("場所/鉄鎚亭.md"), encoding: .utf8)
+        #expect(after == before)          // ファイルは触っていない
+    }
+
+    @Test @MainActor func cancellingKeepsEverything() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText += "\nこちらの編集。"
+        store.requestSelect("場所/職人街.md")
+        store.passageCancel()
+        #expect(store.selected == "場所/鉄鎚亭.md")
+        #expect(store.pendingPassage == nil)
+        #expect(store.isDirty)
+        #expect(store.editedText.hasSuffix("こちらの編集。"))
+    }
+
+    @Test @MainActor func goingToTheParentPassesThroughTheSameGate() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText += "\nこちらの編集。"
+        store.goToParent()
+        #expect(store.pendingPassage == .node("場所/職人街.md"))
+        #expect(store.selected == "場所/鉄鎚亭.md")
+    }
+
+    @Test @MainActor func closingWithNothingUnsavedIsAllowed() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        #expect(store.requestClose())          // そのまま閉じてよい
+        #expect(store.pendingPassage == nil)
+    }
+
+    @Test @MainActor func closingWithUnsavedWorkIsHeldAndAsks() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText += "\nこちらの編集。"
+        #expect(!store.requestClose())         // **閉じさせない**
+        #expect(store.pendingPassage == .closeWindow)
+    }
+
+    @Test @MainActor func savingThenClosingWritesTheFile() async throws {
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText += "\nこちらの編集。"
+        #expect(!store.requestClose())
+        store.passageSaveAndGo()
+        #expect(store.pendingPassage == nil)
+        #expect(!store.isDirty)
+        let text = try String(contentsOf: v.appendingPathComponent("場所/鉄鎚亭.md"), encoding: .utf8)
+        #expect(text.hasSuffix("こちらの編集。"))
+    }
+
+    @Test @MainActor func cancellingTheCloseKeepsTheEdit() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText += "\nこちらの編集。"
+        #expect(!store.requestClose())
+        store.passageCancel()
+        #expect(store.pendingPassage == nil)
+        #expect(store.isDirty)
+    }
+
+    @Test @MainActor func aFailedSaveDoesNotLetTheWindowClose() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText = "front matter を壊した。"
+        #expect(!store.requestClose())
+        store.passageSaveAndGo()
+        #expect(store.pendingPassage == .closeWindow)   // 問いは残る
+        #expect(!store.wantsClose)                      // 閉じてよいとは言っていない
+        #expect(store.saveError != nil)
+    }
+
+    @Test @MainActor func discardingLetsTheWindowClose() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText += "\nこちらの編集。"
+        #expect(!store.requestClose())
+        store.passageDiscardAndGo()
+        #expect(store.wantsClose)                       // 橋がこれを見て閉じる
+        #expect(!store.isDirty)
+    }
+}
+
+/// 条件が成り立つまで、間を置いて確かめる。監視は非同期なので待ちが要る。
+@MainActor
+private func until(_ limit: Duration = .seconds(5), _ cond: () -> Bool) async throws {
+    let deadline = ContinuousClock.now + limit
+    while ContinuousClock.now < deadline {
+        if cond() { return }
+        try await Task.sleep(for: .milliseconds(50))
+    }
+    Issue.record("待ち時間 \(limit) の中で条件が成り立たなかった")
+}
+
+/// **`OpenVaults` はプロセス全体で一つの帳面である。**Swift Testing は既定でテストを
+/// 並行に走らせるので、`await` のたびに互いの帳面を消し合う。ここだけ直列にする。
+/// 帳面に触るのはこの三本だけなので、他の suite と並行に走っても構わない。
+@Suite(.serialized) struct OpenVaultsTests {
+
+    @Test @MainActor func theQuitGateAlsoStopsForADeletedNodeBeingRecovered() async throws {
+        OpenVaults.forgetAllForTest()
+        let store = try await storeHoldingADeletedNode(try TestVault.copiedSample())
+        OpenVaults.register(store, window: nil)
+        #expect(!store.isDirty)
+        #expect(OpenVaults.firstDirty?.store === store)   // 終了の関門も同じ述語で止まる
+        #expect(!OpenVaults.mayQuit())
+    }
+
+    @Test @MainActor func theQuitGateFindsTheWindowHoldingUnsavedWork() async throws {
+        OpenVaults.forgetAllForTest()
+        let clean = VaultStore(vault: try TestVault.copiedSample())
+        let dirty = VaultStore(vault: try TestVault.copiedSample())
+        await clean.load()
+        await dirty.load()
+        OpenVaults.register(clean, window: nil)
+        OpenVaults.register(dirty, window: nil)
+        #expect(OpenVaults.firstDirty == nil)          // まだ誰も編集していない
+        dirty.select("場所/鉄鎚亭.md")
+        try await until { dirty.raw.contains("鉄鎚亭") }
+        dirty.editedText += "\nこちらの編集。"
+        #expect(OpenVaults.firstDirty?.store === dirty)  // **抱えている窓を見つける**
+    }
+    @Test @MainActor func aClosedWindowIsNoLongerAskedOnQuit() async throws {
+        OpenVaults.forgetAllForTest()
+        do {
+            let store = VaultStore(vault: try TestVault.copiedSample())
+            await store.load()
+            OpenVaults.register(store, window: nil)
+            store.select("場所/鉄鎚亭.md")
+            try await until { store.raw.contains("鉄鎚亭") }
+            store.editedText += "\nこちらの編集。"
+            #expect(OpenVaults.firstDirty != nil)
+            OpenVaults.forget(store)
+        }
+        // **閉じた窓の分まで終了を止めない。**
+        #expect(OpenVaults.firstDirty == nil)
+    }
+    @Test @MainActor func theQuitGateAsksTheStoreAndStopsTheQuit() async throws {
+        OpenVaults.forgetAllForTest()
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        OpenVaults.register(store, window: nil)
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText += "\nこちらの編集。"
+        #expect(!OpenVaults.mayQuit())                 // **終了させない**
+        #expect(store.pendingPassage == .closeWindow)  // 三択が出ている
+        store.passageDiscardAndGo()
+        #expect(OpenVaults.mayQuit())                  // 答えたら終われる
+    }
+}
+
+/// 「外で消された節点を抱えたまま、文字列は基準へ戻っている」状態を作る。
+/// 汚れていないが `changedOutside` が立っている——復旧用の写しを持っている状態である。
+@MainActor
+private func storeHoldingADeletedNode(_ v: URL) async throws -> VaultStore {
+    try "---\n名前: 壊れ\n期間: これは年ではない\n---\n本文\n"
+        .write(to: v.appendingPathComponent("場所/壊れ.md"), atomically: true, encoding: .utf8)
+    let store = VaultStore(vault: v)
+    await store.load()
+    await store.stopWatchingForTest()
+    store.select("場所/壊れ.md")
+    try await until { store.raw.contains("壊れ") }
+    let base = store.editedText
+    store.editedText = base + "x"
+    let url = v.appendingPathComponent("場所/壊れ.md")
+    try FileManager.default.removeItem(at: url)
+    await store.reindexForTest([url])
+    store.editedText = base            // 基準へ戻す。汚れは消えるが、抱えている理由は残る
+    return store
 }
