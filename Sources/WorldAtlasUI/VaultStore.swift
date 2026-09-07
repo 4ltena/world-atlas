@@ -487,6 +487,12 @@ public final class VaultStore {
     /// **本文の読み直しまで待ってから戻る。**`apply(_:)` は読み直しを別の `Task` に
     /// 予約するので、そのまま戻ると試験は `raw` や `changedOutside` を古いまま検べる。
     /// 正しい実装でも落ちる試験になり、監視が先回りしたときだけ通るような結果にもなる。
+    /// 監視を止める。**索引し直しを試験が自分で起こす場合に要る。**本物の監視が横から
+    /// 索引し直すと `textToken` が進み、こちらが待っている再読み込みが
+    /// `guard token == textToken` で黙って戻る——並行して走る試験の負荷が高いときだけ
+    /// 起きるので、単独で流すと再現しない。
+    func stopWatchingForTest() async { await indexer?.stopWatching() }
+
     func reindexForTest(_ files: [URL]) async {
         guard let ix = indexer, let s = try? await ix.reindex(files) else { return }
         apply(s)

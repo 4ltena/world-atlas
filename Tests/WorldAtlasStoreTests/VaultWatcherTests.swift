@@ -68,15 +68,10 @@ import WorldAtlasCore
         #expect(s.backrefs["場所/川向こう.md"] == nil)
     }
 
-    // このテストが検査しているのは、通常の流れで停止したあとに更新が来ないことである。
-    // 確認（世代・監視中か）と onUpdate の呼び出しのあいだの競合は、このテストでは
-    // 突けていない。停止（stopWatching）が FSEvents の latency（既定 0.3 秒）よりも
-    // 先に確実に完了するため、確認が実行される時点ではすでに watcher == nil になっており、
-    // 確認と通知の間に人為的に隙間（300ms の遅延）を作り直しても、このテストは通ったまま
-    // だった（旧来の分離した形へ一時的に戻して実測済み。詳細は報告書）。
-    // その競合が実際に守られている根拠は、このテストではなく、reindexAndNotifyIfCurrent の
-    // 中に中断点（await）が一つも無いこと（Swift の actor 隔離により、その関数は一度始まれば
-    // stopWatching を含む他の呼び出しに割り込まれずに完了する）にある。
+    // **止めたあとに書く。**もとは書いてから止めており、FSEvents の遅延（既定 0.3 秒）
+    // より先に停止が済むことを当てにしていた——並行して走る試験の負荷が高いと崩れる。
+    // 加えて、もとの形は `calls.value == 0` だけを見ていたので、**`startWatching` が
+    // まったく効いていなくても通った。**先に効いていることを確かめてから止める。
     @Test func stopWatchingStopsFurtherUpdates() async throws {
         let vault = try SampleVault.copy()
         let indexer = try Indexer(vault: vault)
@@ -85,10 +80,18 @@ import WorldAtlasCore
         try await indexer.startWatching { _ in calls.update { $0 += 1 } }
         try await Task.sleep(for: .milliseconds(500))
         let file = vault.appendingPathComponent("場所/川向こう.md")
+
+        // 監視が効いていることを確かめる。
         try (try String(contentsOf: file, encoding: .utf8) + "\n追記\n").write(to: file, atomically: true, encoding: .utf8)
+        let deadline = ContinuousClock.now + .seconds(5)
+        while calls.value == 0, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(50)) }
+        try #require(calls.value > 0, "止める前に監視が効いていない")
+
         await indexer.stopWatching()
+        let before = calls.value
+        try (try String(contentsOf: file, encoding: .utf8) + "\nさらに追記\n").write(to: file, atomically: true, encoding: .utf8)
         try await Task.sleep(for: .seconds(2))
-        #expect(calls.value == 0)
+        #expect(calls.value == before)      // 止めたあとは増えない
     }
 }
 

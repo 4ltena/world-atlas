@@ -461,6 +461,7 @@ import WorldAtlasCore
         let v = try TestVault.copiedSample()
         let store = VaultStore(vault: v)
         await store.load()
+        await store.stopWatchingForTest()   // 索引し直すのはこの試験だけ
         store.select("場所/鉄鎚亭.md")
         try await until { store.raw.contains("鉄鎚亭") }
         // 外のエディタが書き換えた体で、直に書いて索引し直す。
@@ -477,6 +478,7 @@ import WorldAtlasCore
         let v = try TestVault.copiedSample()
         let store = VaultStore(vault: v)
         await store.load()
+        await store.stopWatchingForTest()   // 索引し直すのはこの試験だけ
         store.select("場所/鉄鎚亭.md")
         try await until { store.raw.contains("鉄鎚亭") }
         store.editedText = store.editedText + "\nこちらの編集。"
@@ -496,6 +498,7 @@ import WorldAtlasCore
         let v = try TestVault.copiedSample()
         let store = VaultStore(vault: v)
         await store.load()
+        await store.stopWatchingForTest()   // 索引し直すのはこの試験だけ
         store.select("場所/鉄鎚亭.md")
         try await until { store.raw.contains("鉄鎚亭") }
         store.editedText = store.editedText + "\nこちらの編集。"
@@ -516,6 +519,7 @@ import WorldAtlasCore
         let v = try TestVault.copiedSample()
         let store = VaultStore(vault: v)
         await store.load()
+        await store.stopWatchingForTest()   // 索引し直すのはこの試験だけ
         store.select("場所/鉄鎚亭.md")
         try await until { store.raw.contains("鉄鎚亭") }
         // 先に編集しておく。編集を抱えていないと、消えた節点は読み込みに失敗した扱いで
@@ -536,6 +540,7 @@ import WorldAtlasCore
         let v = try TestVault.copiedSample()
         let store = VaultStore(vault: v)
         await store.load()
+        await store.stopWatchingForTest()   // 索引し直すのはこの試験だけ
         store.select("場所/鉄鎚亭.md")
         try await until { store.raw.contains("鉄鎚亭") }
         store.editedText = store.editedText.replacingOccurrences(of: "種別: 宿", with: "種別: 旅籠")
@@ -556,6 +561,7 @@ import WorldAtlasCore
         let v = try TestVault.copiedSample()
         let store = VaultStore(vault: v)
         await store.load()
+        await store.stopWatchingForTest()   // 索引し直すのはこの試験だけ
         store.select("場所/鉄鎚亭.md")
         try await until { store.raw.contains("鉄鎚亭") }
         store.editedText += "\nこちらの編集。"
@@ -578,6 +584,7 @@ import WorldAtlasCore
         let v = try TestVault.copiedSample()
         let store = VaultStore(vault: v)
         await store.load()
+        await store.stopWatchingForTest()   // 索引し直すのはこの試験だけ
         store.select("場所/鉄鎚亭.md")
         try await until { store.raw.contains("鉄鎚亭") }
         store.editedText += "\nこちらの編集。"
