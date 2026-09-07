@@ -206,8 +206,19 @@ public final class VaultStore {
         }
     }
 
-    /// 課題 6 で窓を閉じる。ここではまだ何もしない。
-    func closeAfterPassage() {}
+    /// 関門を抜けたので閉じてよい、という印。AppKit の橋がこれを見る。
+    public private(set) var wantsClose = false
+
+    /// 窓を閉じてよいか。**未保存なら閉じさせず、問いを出す。**
+    /// AppKit の `windowShouldClose(_:)` がこれを呼ぶ。
+    public func requestClose() -> Bool {
+        guard isDirty else { return true }
+        pendingPassage = .closeWindow
+        return false
+    }
+
+    /// 三択のどれかを通って、閉じてよくなった。
+    func closeAfterPassage() { wantsClose = true }
 
     // MARK: 動かすもの
 

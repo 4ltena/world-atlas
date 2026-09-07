@@ -683,6 +683,75 @@ import WorldAtlasCore
         #expect(store.selected == "場所/鉄鎚亭.md")
     }
 
+    @Test @MainActor func closingWithNothingUnsavedIsAllowed() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        #expect(store.requestClose())          // そのまま閉じてよい
+        #expect(store.pendingPassage == nil)
+    }
+
+    @Test @MainActor func closingWithUnsavedWorkIsHeldAndAsks() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText += "\nこちらの編集。"
+        #expect(!store.requestClose())         // **閉じさせない**
+        #expect(store.pendingPassage == .closeWindow)
+    }
+
+    @Test @MainActor func savingThenClosingWritesTheFile() async throws {
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText += "\nこちらの編集。"
+        #expect(!store.requestClose())
+        store.passageSaveAndGo()
+        #expect(store.pendingPassage == nil)
+        #expect(!store.isDirty)
+        let text = try String(contentsOf: v.appendingPathComponent("場所/鉄鎚亭.md"), encoding: .utf8)
+        #expect(text.hasSuffix("こちらの編集。"))
+    }
+
+    @Test @MainActor func cancellingTheCloseKeepsTheEdit() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText += "\nこちらの編集。"
+        #expect(!store.requestClose())
+        store.passageCancel()
+        #expect(store.pendingPassage == nil)
+        #expect(store.isDirty)
+    }
+
+    @Test @MainActor func aFailedSaveDoesNotLetTheWindowClose() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText = "front matter を壊した。"
+        #expect(!store.requestClose())
+        store.passageSaveAndGo()
+        #expect(store.pendingPassage == .closeWindow)   // 問いは残る
+        #expect(!store.wantsClose)                      // 閉じてよいとは言っていない
+        #expect(store.saveError != nil)
+    }
+
+    @Test @MainActor func discardingLetsTheWindowClose() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText += "\nこちらの編集。"
+        #expect(!store.requestClose())
+        store.passageDiscardAndGo()
+        #expect(store.wantsClose)                       // 橋がこれを見て閉じる
+        #expect(!store.isDirty)
+    }
+
     /// 条件が成り立つまで、間を置いて確かめる。監視は非同期なので待ちが要る。
     @MainActor
     private func until(_ limit: Duration = .seconds(5), _ cond: () -> Bool) async throws {

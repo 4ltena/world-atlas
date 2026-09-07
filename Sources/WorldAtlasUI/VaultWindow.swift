@@ -42,6 +42,8 @@ public struct VaultWindow: View {
         .navigationSubtitle(store.timelineSubtitle)
         .task { await store.load() }
         .onDisappear { Task { await store.stop() } }
+        .background(WindowCloseGuard(shouldClose: { store.requestClose() },
+                                     wantsClose: store.wantsClose))
         .focusedSceneValue(\.vaultStore, store)
         .environment(\.openURL, OpenURLAction { url in
             // 自分のスキームは必ず自分で受ける。解決先が無ければ何もしない。
