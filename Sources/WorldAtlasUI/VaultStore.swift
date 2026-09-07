@@ -65,6 +65,36 @@ public final class VaultStore {
 
     // MARK: 編集（設計書 8.3）
 
+    /// ⌘N の入力欄を出しているか。
+    public var creating = false
+    /// 作れなかった理由。入力欄の中に出す。
+    public private(set) var creationError: String?
+
+    /// 節点を作って原文で開く(設計書 8.3)。**未保存の編集があるときは関門を通す。**
+    @discardableResult
+    public func createNode(named name: String) -> Bool {
+        creationError = nil
+        do {
+            let path = try NodeCreator.create(in: vault, kind: kind, name: name, year: year)
+            creating = false
+            // 索引へ載せてから開く。載る前に選ぶと「消えた節点」として弾かれる。
+            let url = vault.appendingPathComponent(path)
+            Task { [weak self] in
+                guard let ix = self?.indexer, let s = try? await ix.reindex([url]) else { return }
+                self?.apply(s)
+                self?.showsRaw = true          // 作った直後は原文で開く
+                self?.requestSelect(path)
+            }
+            return true
+        } catch let e as NodeCreator.Failure {
+            creationError = e.message
+            return false
+        } catch {
+            creationError = "作れませんでした。ディレクトリの権限を確かめてください。"
+            return false
+        }
+    }
+
     /// 未保存の編集。原文の欄が触っているあいだだけ在る。
     public private(set) var draft: Draft?
     /// `raw` を書いたときの token。`textToken` と一致していれば、読み込みが済んでいる。

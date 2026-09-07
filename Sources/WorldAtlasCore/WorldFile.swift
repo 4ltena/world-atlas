@@ -76,7 +76,9 @@ public enum WorldFile {
     /// 値を YAML の一行の形にする。平文で書けるかどうかの判断は Yams に任せ、書けない値は
     /// Yams に引用させる。flow が真なら `[ ]` の中に置く値で、そこでは `, [ ] { }` と改行に加え、
     /// 先頭の `?` `:` も区切りになるが Yams は block の文脈で見るので、その分だけこちらで引用に落とす。
-    private static func scalar(_ s: String, flow: Bool = false) -> String {
+    ///
+    /// **節点のファイルを作るときにも使う**（`NodeCreator`）。ここが唯一の出所である。
+    public static func scalar(_ s: String, flow: Bool = false) -> String {
         guard let d = try? Yams.dump(object: s, allowUnicode: true).trimmingCharacters(in: .newlines),
               !d.contains("\n") else { return quoted(s) }
         let isPlain = d.first != "'" && d.first != "\""

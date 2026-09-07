@@ -4,6 +4,7 @@ import WorldAtlasStore
 /// vault ひとつぶんの窓。上段に木と原稿、下段に年表を置く。
 public struct VaultWindow: View {
     @State private var store: VaultStore
+    @State private var newName = ""
 
     public init(vault: URL) {
         _store = State(initialValue: VaultStore(vault: vault))
@@ -75,6 +76,26 @@ public struct VaultWindow: View {
             Button("やめる", role: .cancel) { store.passageCancel() }
         } message: {
             Text("「保存せず移る」を選ぶと、いまの編集は失われます。")
+        }
+        .sheet(isPresented: Binding(get: { store.creating },
+                                    set: { store.creating = $0 })) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("新しい\(store.kind.rawValue)").font(.headline)
+                TextField("名前", text: $newName)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 260)
+                if let e = store.creationError {
+                    Text(e).font(.caption).foregroundStyle(Palette.warning)
+                }
+                HStack {
+                    Spacer()
+                    Button("やめる", role: .cancel) { store.creating = false; newName = "" }
+                    Button("作る") { if store.createNode(named: newName) { newName = "" } }
+                        .keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding(20)
+            .background(Palette.ground)
         }
     }
 }
