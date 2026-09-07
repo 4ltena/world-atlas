@@ -255,7 +255,10 @@ public final class VaultStore {
     /// 節点を選ぶ。**移動の経路はすべてここを通す。**未保存なら尋ねる。
     public func requestSelect(_ path: String?) {
         guard path != selected else { return }
-        guard isDirty else { return select(path) }
+        // **`canSave` を見る。**`isDirty` だけだと、外で消された節点を抱えたまま
+        // 文字列を基準へ戻した状態（汚れていないが `changedOutside`）で、唯一の写しを
+        // 黙って捨てて移ってしまう。⌘S が書くものを持っているなら、必ず尋ねる。
+        guard canSave else { return select(path) }
         pendingPassage = .node(path)
     }
 
@@ -291,7 +294,7 @@ public final class VaultStore {
     /// 窓を閉じてよいか。**未保存なら閉じさせず、問いを出す。**
     /// AppKit の `windowShouldClose(_:)` がこれを呼ぶ。
     public func requestClose() -> Bool {
-        guard isDirty else { return true }
+        guard canSave else { return true }   // 移動の関門と同じ述語を使う
         pendingPassage = .closeWindow
         return false
     }
@@ -602,7 +605,12 @@ public final class VaultStore {
         // 保存先が食い違う。選択を外すときは、汚れていない下書きも一緒に捨てる——
         // `save()` は綺麗な下書きを残すので、保存した直後に外で消されるとここへ来る。
         if let p = selected, s.nodes[p] == nil {
-            if draft?.path == p, isDirty {
+            // **`isDirty` だけを見ない。**「わざと抱えている」ことと「いま汚れている」ことは
+            // 別である——利用者が文字列を基準へ戻すと汚れは消えるが、抱えている理由は
+            // 変わらない。`changedOutside` がその印で、`save()` が書き終えるまで下りない。
+            // ここを `isDirty` だけにすると、基準へ戻したあとに別のファイルの変更で
+            // 索引が走っただけで、復旧用の下書きと保存先が消える。
+            if draft?.path == p, isDirty || changedOutside {
                 changedOutside = true
             } else {
                 selected = nil

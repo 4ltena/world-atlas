@@ -27,7 +27,7 @@ public enum OpenVaults {
     public static var firstDirty: (store: VaultStore, window: NSWindow?)? {
         for e in entries {
             guard let s = e.store else { continue }
-            if s.isDirty { return (s, e.window) }
+            if s.canSave { return (s, e.window) }   // 移動・窓閉じと同じ述語
         }
         return nil
     }

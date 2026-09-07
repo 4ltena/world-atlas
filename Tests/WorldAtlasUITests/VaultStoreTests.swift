@@ -626,6 +626,15 @@ import WorldAtlasCore
         #expect(!store.isDirty)
         // **欄はここで閉じない。**行き止まりにしてはいけない。
         #expect(store.canEdit)
+        // **基準へ戻したまま、別のファイルの変更で索引が走っても失わない。**
+        // 抱えている理由は「わざと抱えた」ことであって、いま汚れていることではない。
+        store.editedText = base
+        let other = v.appendingPathComponent("場所/職人街.md")
+        await store.reindexForTest([other])
+        #expect(store.selected == "場所/壊れ.md")   // 保存先を失っていない
+        #expect(store.draft != nil)                 // 復旧用の下書きも残っている
+        #expect(store.changedOutside)
+        #expect(store.canEdit)
         // 次の一打も届く——setter が拒んでいない証拠。
         store.editedText = base + "x"
         #expect(store.editedText.hasSuffix("x"))
@@ -635,6 +644,20 @@ import WorldAtlasCore
         #expect(FileManager.default.fileExists(atPath: url.path))
         let saved = try String(contentsOf: url, encoding: .utf8)
         #expect(saved.contains("直した"))
+    }
+
+    @Test @MainActor func leavingADeletedNodeStillAsksAfterTheTextIsReverted() async throws {
+        // **関門の述語は `canSave` である。**`isDirty` だけだと、消えた節点の唯一の写しを
+        // 黙って捨てて移ってしまう——⌘S が書くものを持っているなら、必ず尋ねる。
+        let store = try await storeHoldingADeletedNode(try TestVault.copiedSample())
+        #expect(!store.isDirty)
+        #expect(store.changedOutside)
+        store.requestSelect("場所/職人街.md")
+        #expect(store.pendingPassage == .node("場所/職人街.md"))   // 尋ねている
+        #expect(store.selected == "場所/壊れ.md")                  // まだ移っていない
+        store.passageCancel()
+        #expect(!store.requestClose())                            // 窓を閉じるときも尋ねる
+        #expect(store.pendingPassage == .closeWindow)
     }
 
     @Test @MainActor func aFailedReloadDoesNotOfferAnEmptyEditableDraft() async throws {
@@ -851,6 +874,16 @@ private func until(_ limit: Duration = .seconds(5), _ cond: () -> Bool) async th
 /// 並行に走らせるので、`await` のたびに互いの帳面を消し合う。ここだけ直列にする。
 /// 帳面に触るのはこの三本だけなので、他の suite と並行に走っても構わない。
 @Suite(.serialized) struct OpenVaultsTests {
+
+    @Test @MainActor func theQuitGateAlsoStopsForADeletedNodeBeingRecovered() async throws {
+        OpenVaults.forgetAllForTest()
+        let store = try await storeHoldingADeletedNode(try TestVault.copiedSample())
+        OpenVaults.register(store, window: nil)
+        #expect(!store.isDirty)
+        #expect(OpenVaults.firstDirty?.store === store)   // 終了の関門も同じ述語で止まる
+        #expect(!OpenVaults.mayQuit())
+    }
+
     @Test @MainActor func theQuitGateFindsTheWindowHoldingUnsavedWork() async throws {
         OpenVaults.forgetAllForTest()
         let clean = VaultStore(vault: try TestVault.copiedSample())
@@ -893,4 +926,24 @@ private func until(_ limit: Duration = .seconds(5), _ cond: () -> Bool) async th
         store.passageDiscardAndGo()
         #expect(OpenVaults.mayQuit())                  // 答えたら終われる
     }
+}
+
+/// 「外で消された節点を抱えたまま、文字列は基準へ戻っている」状態を作る。
+/// 汚れていないが `changedOutside` が立っている——復旧用の写しを持っている状態である。
+@MainActor
+private func storeHoldingADeletedNode(_ v: URL) async throws -> VaultStore {
+    try "---\n名前: 壊れ\n期間: これは年ではない\n---\n本文\n"
+        .write(to: v.appendingPathComponent("場所/壊れ.md"), atomically: true, encoding: .utf8)
+    let store = VaultStore(vault: v)
+    await store.load()
+    await store.stopWatchingForTest()
+    store.select("場所/壊れ.md")
+    try await until { store.raw.contains("壊れ") }
+    let base = store.editedText
+    store.editedText = base + "x"
+    let url = v.appendingPathComponent("場所/壊れ.md")
+    try FileManager.default.removeItem(at: url)
+    await store.reindexForTest([url])
+    store.editedText = base            // 基準へ戻す。汚れは消えるが、抱えている理由は残る
+    return store
 }
