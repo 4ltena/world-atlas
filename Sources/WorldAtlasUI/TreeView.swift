@@ -26,7 +26,7 @@ struct TreeView: View {
             } else if let p = store.selected {
                 // 外で消された節点を、未保存の編集ごと抱えている間。保存先は選択のまま
                 // 変わっていないので、「選んでいません」は嘘になる。ファイル名だけ出す。
-                Text((p as NSString).lastPathComponent.replacingOccurrences(of: ".md", with: ""))
+                Text(((p as NSString).lastPathComponent as NSString).deletingPathExtension)
                     .font(.headline)
                 Text("消えました").font(.caption).foregroundStyle(Palette.warning)
             } else {

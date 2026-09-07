@@ -36,6 +36,9 @@ struct ManuscriptView: View {
 
     private var raw: some View {
         VStack(spacing: 0) {
+            // **読み込み失敗の理由をここでも出す。**欄を disabled にするだけでは、
+            // 利用者には「なぜ打てないか」が見えない——鍵がかかった空欄だけが残る。
+            if let e = store.textError { notice(e) }
             if let e = store.saveError { notice(e) }
             if store.changedOutside {
                 notice("外で変更あり。⌘S を押すと、いまここにある内容で上書きします。")

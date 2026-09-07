@@ -599,6 +599,44 @@ import WorldAtlasCore
         #expect(!store.changedOutside)
     }
 
+    @Test @MainActor func revertingTheTextAfterADeletionDoesNotLockTheEditor() async throws {
+        // レビューで見つかった経路: 壊れているが読める原稿を原文で開く → 一文字足す →
+        // 外で削除 → 足した一文字を消して基準へ戻す。基準へ戻った瞬間 isDirty は偽に
+        // なるが、消えた節点をわざと抱えている印（changedOutside）はそこでは下りない
+        // ——`save()` が書き終えるまで下りない。**`isDirty` だけを見ると、ここで
+        // 欄が閉じ、次の一打も setter に拒まれて行き止まりになる。**
+        let v = try TestVault.copiedSample()
+        try "---\n名前: 壊れ\n期間: これは年ではない\n---\n本文\n"
+            .write(to: v.appendingPathComponent("場所/壊れ.md"), atomically: true, encoding: .utf8)
+        let store = VaultStore(vault: v)
+        await store.load()
+        await store.stopWatchingForTest()   // 索引し直すのはこの試験だけ
+        store.select("場所/壊れ.md")
+        try await until { store.raw.contains("壊れ") }
+        #expect(store.isBroken)
+        let base = store.editedText
+        store.editedText = base + "x"
+        let url = v.appendingPathComponent("場所/壊れ.md")
+        try FileManager.default.removeItem(at: url)
+        await store.reindexForTest([url])
+        #expect(store.changedOutside)
+        #expect(store.canEdit)
+        // 足した一文字を消して、基準へ戻す。
+        store.editedText = base
+        #expect(!store.isDirty)
+        // **欄はここで閉じない。**行き止まりにしてはいけない。
+        #expect(store.canEdit)
+        // 次の一打も届く——setter が拒んでいない証拠。
+        store.editedText = base + "x"
+        #expect(store.editedText.hasSuffix("x"))
+        // front matter を直して、消えた場所へ書き戻す。それが復旧の目的である。
+        store.editedText = "---\n名前: 壊れ\n種別: 場所\n期間: [1, 現在]\n---\n直した。\n"
+        #expect(store.save())
+        #expect(FileManager.default.fileExists(atPath: url.path))
+        let saved = try String(contentsOf: url, encoding: .utf8)
+        #expect(saved.contains("直した"))
+    }
+
     @Test @MainActor func aFailedReloadDoesNotOfferAnEmptyEditableDraft() async throws {
         // 世界.md が外で非UTF-8へ書き換わったとき、読み込みは失敗する。その空文字を
         // 「外の内容」として基準へ丸めてはいけない——綺麗な下書きだけで編集可能になり、

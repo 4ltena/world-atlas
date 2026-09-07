@@ -89,7 +89,7 @@ public struct VaultWindow: View {
                 }
                 HStack {
                     Spacer()
-                    Button("やめる", role: .cancel) { store.creating = false; newName = "" }
+                    Button("やめる", role: .cancel) { store.cancelCreating(); newName = "" }
                     Button("作る") { if store.createNode(named: newName) { newName = "" } }
                         .keyboardShortcut(.defaultAction)
                 }
