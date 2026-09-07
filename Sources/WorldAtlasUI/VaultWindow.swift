@@ -41,9 +41,13 @@ public struct VaultWindow: View {
         .navigationTitle(store.snapshot.world.name.isEmpty ? "world-atlas" : store.snapshot.world.name)
         .navigationSubtitle(store.timelineSubtitle)
         .task { await store.load() }
-        .onDisappear { Task { await store.stop() } }
+        .onDisappear {
+            Task { await store.stop() }
+            OpenVaults.forget(store)
+        }
         .background(WindowCloseGuard(shouldClose: { store.requestClose() },
-                                     wantsClose: store.wantsClose))
+                                     wantsClose: store.wantsClose,
+                                     onWindow: { OpenVaults.register(store, window: $0) }))
         .focusedSceneValue(\.vaultStore, store)
         .environment(\.openURL, OpenURLAction { url in
             // 自分のスキームは必ず自分で受ける。解決先が無ければ何もしない。

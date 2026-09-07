@@ -7,6 +7,8 @@ struct WindowCloseGuard: NSViewRepresentable {
     var shouldClose: () -> Bool
     /// 関門を抜けた印。**真になったら、この橋が載っている窓を閉じる。**
     var wantsClose: Bool
+    /// 窓が分かったところで呼ばれる。**⌘Q の帳面 `OpenVaults` へ載せるための口。**
+    var onWindow: ((NSWindow) -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator(shouldClose: shouldClose) }
 
@@ -19,6 +21,7 @@ struct WindowCloseGuard: NSViewRepresentable {
 
     func updateNSView(_ v: NSView, context: Context) {
         context.coordinator.shouldClose = shouldClose
+        context.coordinator.onWindow = onWindow
         context.coordinator.attach(to: v.window)
         // **`NSApplication.shared.keyWindow` を閉じない。**承認してから閉じるまでに
         // 前面の窓が変わっていることがあり、そのときは別の窓——未保存かもしれない窓——が
@@ -29,6 +32,7 @@ struct WindowCloseGuard: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, NSWindowDelegate {
         var shouldClose: () -> Bool
+        var onWindow: ((NSWindow) -> Void)?
         /// もとの delegate。SwiftUI が差しているものを壊さないよう、知らない問いは渡す。
         // `forwardingTarget(for:)` は `NSObject` の非隔離のメソッドを override するので、
         // この型が @MainActor でも、そこからは @MainActor の値を読めない。AppKit は主スレッド
@@ -39,12 +43,12 @@ struct WindowCloseGuard: NSViewRepresentable {
         init(shouldClose: @escaping () -> Bool) { self.shouldClose = shouldClose }
 
         func attach(to window: NSWindow?) {
-            guard let window, window !== self.window else { return }
+            guard let window else { return }
             self.window = window
-            if window.delegate !== self {
-                original = window.delegate
-                window.delegate = self
-            }
+            onWindow?(window)                        // ← 帳面へ
+            guard window.delegate !== self else { return }
+            original = window.delegate
+            window.delegate = self
         }
 
         func windowShouldClose(_ sender: NSWindow) -> Bool { shouldClose() }

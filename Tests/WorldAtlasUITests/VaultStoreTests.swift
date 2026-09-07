@@ -759,6 +759,51 @@ import WorldAtlasCore
         #expect(!store.isDirty)
     }
 
+    @Test @MainActor func theQuitGateFindsTheWindowHoldingUnsavedWork() async throws {
+        OpenVaults.forgetAllForTest()
+        let clean = VaultStore(vault: try TestVault.copiedSample())
+        let dirty = VaultStore(vault: try TestVault.copiedSample())
+        await clean.load()
+        await dirty.load()
+        OpenVaults.register(clean, window: nil)
+        OpenVaults.register(dirty, window: nil)
+        #expect(OpenVaults.firstDirty == nil)          // まだ誰も編集していない
+        dirty.select("場所/鉄鎚亭.md")
+        try await until { dirty.raw.contains("鉄鎚亭") }
+        dirty.editedText += "\nこちらの編集。"
+        #expect(OpenVaults.firstDirty?.store === dirty)  // **抱えている窓を見つける**
+    }
+
+    @Test @MainActor func aClosedWindowIsNoLongerAskedOnQuit() async throws {
+        OpenVaults.forgetAllForTest()
+        do {
+            let store = VaultStore(vault: try TestVault.copiedSample())
+            await store.load()
+            OpenVaults.register(store, window: nil)
+            store.select("場所/鉄鎚亭.md")
+            try await until { store.raw.contains("鉄鎚亭") }
+            store.editedText += "\nこちらの編集。"
+            #expect(OpenVaults.firstDirty != nil)
+            OpenVaults.forget(store)
+        }
+        // **閉じた窓の分まで終了を止めない。**
+        #expect(OpenVaults.firstDirty == nil)
+    }
+
+    @Test @MainActor func theQuitGateAsksTheStoreAndStopsTheQuit() async throws {
+        OpenVaults.forgetAllForTest()
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        OpenVaults.register(store, window: nil)
+        store.select("場所/鉄鎚亭.md")
+        try await until { store.raw.contains("鉄鎚亭") }
+        store.editedText += "\nこちらの編集。"
+        #expect(!OpenVaults.mayQuit())                 // **終了させない**
+        #expect(store.pendingPassage == .closeWindow)  // 三択が出ている
+        store.passageDiscardAndGo()
+        #expect(OpenVaults.mayQuit())                  // 答えたら終われる
+    }
+
     /// 条件が成り立つまで、間を置いて確かめる。監視は非同期なので待ちが要る。
     @MainActor
     private func until(_ limit: Duration = .seconds(5), _ cond: () -> Bool) async throws {
