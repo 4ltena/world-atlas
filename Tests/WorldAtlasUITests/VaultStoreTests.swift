@@ -758,7 +758,23 @@ import WorldAtlasCore
         #expect(store.wantsClose)                       // 橋がこれを見て閉じる
         #expect(!store.isDirty)
     }
+}
 
+/// 条件が成り立つまで、間を置いて確かめる。監視は非同期なので待ちが要る。
+@MainActor
+private func until(_ limit: Duration = .seconds(5), _ cond: () -> Bool) async throws {
+    let deadline = ContinuousClock.now + limit
+    while ContinuousClock.now < deadline {
+        if cond() { return }
+        try await Task.sleep(for: .milliseconds(50))
+    }
+    Issue.record("待ち時間 \(limit) の中で条件が成り立たなかった")
+}
+
+/// **`OpenVaults` はプロセス全体で一つの帳面である。**Swift Testing は既定でテストを
+/// 並行に走らせるので、`await` のたびに互いの帳面を消し合う。ここだけ直列にする。
+/// 帳面に触るのはこの三本だけなので、他の suite と並行に走っても構わない。
+@Suite(.serialized) struct OpenVaultsTests {
     @Test @MainActor func theQuitGateFindsTheWindowHoldingUnsavedWork() async throws {
         OpenVaults.forgetAllForTest()
         let clean = VaultStore(vault: try TestVault.copiedSample())
@@ -773,7 +789,6 @@ import WorldAtlasCore
         dirty.editedText += "\nこちらの編集。"
         #expect(OpenVaults.firstDirty?.store === dirty)  // **抱えている窓を見つける**
     }
-
     @Test @MainActor func aClosedWindowIsNoLongerAskedOnQuit() async throws {
         OpenVaults.forgetAllForTest()
         do {
@@ -789,7 +804,6 @@ import WorldAtlasCore
         // **閉じた窓の分まで終了を止めない。**
         #expect(OpenVaults.firstDirty == nil)
     }
-
     @Test @MainActor func theQuitGateAsksTheStoreAndStopsTheQuit() async throws {
         OpenVaults.forgetAllForTest()
         let store = VaultStore(vault: try TestVault.copiedSample())
@@ -802,16 +816,5 @@ import WorldAtlasCore
         #expect(store.pendingPassage == .closeWindow)  // 三択が出ている
         store.passageDiscardAndGo()
         #expect(OpenVaults.mayQuit())                  // 答えたら終われる
-    }
-
-    /// 条件が成り立つまで、間を置いて確かめる。監視は非同期なので待ちが要る。
-    @MainActor
-    private func until(_ limit: Duration = .seconds(5), _ cond: () -> Bool) async throws {
-        let deadline = ContinuousClock.now + limit
-        while ContinuousClock.now < deadline {
-            if cond() { return }
-            try await Task.sleep(for: .milliseconds(50))
-        }
-        Issue.record("待ち時間 \(limit) の中で条件が成り立たなかった")
     }
 }
