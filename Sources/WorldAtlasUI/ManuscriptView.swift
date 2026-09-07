@@ -26,6 +26,9 @@ struct ManuscriptView: View {
             }
             .padding(10)
             Rectangle().fill(Palette.rule).frame(height: 1)
+            // 節点を作ったが開けなかった理由。シートは閉じた後なので、木の右側で拾う
+            // （設計書 8.3）。表示・原文どちらの区分けでも見えるよう、切り替えの外に置く。
+            if let e = store.creationError { notice(e) }
             if store.showsRawEffectively { raw } else { rendered }
         }
         .background(Palette.ground)

@@ -10,7 +10,7 @@ public struct AppCommands: Commands {
 
     public var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("新規項目…") { store?.creating = true }
+            Button("新規項目…") { store?.beginCreating() }
                 .keyboardShortcut("n", modifiers: .command)
                 .disabled(store == nil)
 

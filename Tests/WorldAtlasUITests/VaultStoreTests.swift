@@ -599,6 +599,38 @@ import WorldAtlasCore
         #expect(!store.changedOutside)
     }
 
+    @Test @MainActor func aFailedReloadDoesNotOfferAnEmptyEditableDraft() async throws {
+        // 世界.md が外で非UTF-8へ書き換わったとき、読み込みは失敗する。その空文字を
+        // 「外の内容」として基準へ丸めてはいけない——綺麗な下書きだけで編集可能になり、
+        // 理由の出ないまま⌘Sが既存のファイルを打ち直した分だけで潰してしまう。
+        let v = try TestVault.copiedSample()
+        let store = VaultStore(vault: v)
+        await store.load()
+        await store.stopWatchingForTest()
+        store.select(nil)
+        store.editedText = "灰海は塩と鉄の海である。"
+        #expect(store.save())
+        #expect(!store.isDirty)                        // 綺麗な下書きが残った
+        let url = v.appendingPathComponent("世界.md")
+        // 有効な UTF-8 として読めないバイト列で外から上書きする。
+        let corrupted = Data([0xFF, 0xFE, 0x00, 0x80])
+        try corrupted.write(to: url)
+        await store.rebuildForTest()
+        #expect(!store.canEdit)                        // 空欄を編集可能にしない
+        #expect(store.textError != nil)                // 読めなかった理由が立っている
+        // **下書きが空文字で置き換わっていない。**ここが「理由の出ない編集可能な空欄」の
+        // 実体である——`canEdit` が誤って真になるのも、下書きの中身が空にすり替わって
+        // いるからこそ起きる。UI は disabled にするが、`save()` は `canEdit` を見ない
+        // （`canSave` だけを見る）ので、disk 上のバイト列そのものでの検査は、素の
+        // `save()` 呼び出しだけでは常に無変化になり、この壊れを見分けられない
+        // （下書きは空文字どうしで綺麗なままなので、書くものが無いと判定される）。
+        #expect(store.editedText == "灰海は塩と鉄の海である。")
+        // 書くものが無いと判定されるので、素の save() はディスクへ触れない。
+        store.save()
+        let after = try Data(contentsOf: url)
+        #expect(after == corrupted)
+    }
+
     @Test @MainActor func movingWithNothingUnsavedGoesStraightThrough() async throws {
         let store = VaultStore(vault: try TestVault.copiedSample())
         await store.load()

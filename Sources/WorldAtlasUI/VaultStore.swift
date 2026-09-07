@@ -67,12 +67,20 @@ public final class VaultStore {
 
     /// ⌘N の入力欄を出しているか。
     public var creating = false
-    /// 作れなかった理由。入力欄の中に出す。
+    /// 作れなかった理由。入力欄の中と、シートを閉じた後は木の右側の帯にも出す
+    /// （索引が失敗する経路はシートが閉じた後に理由が付くため）。
     public private(set) var creationError: String?
     /// 作った節点の path。索引へ載って選べるようになったら原文表示にする——
     /// 関門の前で `showsRaw` へ直接立てると、移動を取り消したときに元の節点の
     /// 表示モードまで変わってしまう(select(_:) は関門を通った後にしか動かない)。
     private var showsRawOnArrival: String?
+
+    /// ⌘N の入力欄を開く。**前回の理由を持ち越さない。**消さずに開くと、次に
+    /// 作ろうとしている節点とは無関係な、前回の失敗が新しいシートに残ってしまう。
+    public func beginCreating() {
+        creationError = nil
+        creating = true
+    }
 
     /// 節点を作って原文で開く(設計書 8.3)。**未保存の編集があるときは関門を通す。**
     @discardableResult
@@ -131,10 +139,15 @@ public final class VaultStore {
     /// `raw` が今の選択の原文になっているか。**読み込みは非同期なので、選び直した直後は偽になる。**
     public var isTextLoaded: Bool { loadedTextToken == textToken }
 
-    /// 原文の欄を触れるか。**下書きを抱えているなら、読み込みが失敗しても触れる。**
+    /// 原文の欄を触れるか。**汚れた下書きを抱えているなら、読み込みが失敗しても触れる。**
     /// 外でファイルが消された後に、壊れた front matter を直して書き戻す経路がここを通る。
     /// 触れなくすると、⌘S は検証で落ち、直す手段も無くなって行き止まりになる。
-    public var canEdit: Bool { isTextLoaded || draft != nil }
+    /// **`draft != nil` だけでは緩すぎる。**保存直後の綺麗な下書きが残ったまま、外で
+    /// 読み込みに失敗すると（例: 世界.md が非UTF-8へ書き換わる）、その下書きだけで
+    /// 空欄が編集可能になり、理由の出ないまま⌘Sが元のファイルを上書きしてしまう。
+    /// 消えた節点を抱える下書きは必ず汚れている（`apply(_:)` が汚れていなければ
+    /// 一緒に捨てる）ので、`isDirty` に絞っても復旧経路は塞がない。
+    public var canEdit: Bool { isTextLoaded || isDirty }
 
     /// 原文の欄が読み書きする口。下書きがまだ無ければ、その場で始める。
     public var editedText: String {
@@ -627,7 +640,11 @@ public final class VaultStore {
         // 編集中なら、その節点のファイルの中身そのものと基準を比べる（設計書 8.3）。
         // **索引が走ったこと自体を「外で変わった」と読まない。**年を動かすと 世界.yaml が
         // 書かれて全体の索引が走るので、それを外の変更と数えると警告が出続ける。
-        if let d = draft, d.path == target {
+        // **読み込みが失敗したときは比べない。**failure 時の whole は空文字であり、
+        // 「外がこう変わった」という中身ではない。ここを素通しすると、非UTF-8へ
+        // 書き換えられた原稿が空の基準へ丸められ、下書きが汚れていなければ静かに
+        // 空欄へ差し替わってしまう。
+        if failure == nil, let d = draft, d.path == target {
             let (next, outside) = d.merging(external: whole)
             draft = next
             if outside { changedOutside = true }

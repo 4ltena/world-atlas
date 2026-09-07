@@ -23,7 +23,10 @@ public enum NodeCreator {
         let dir = vault.appendingPathComponent(kind.rawValue)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent("\(trimmed).md")
-        // 型ごとに期間の鍵が違う。ここを間違えると必ず壊れた節点になる(設計書 4.3)。
+        // 型ごとに期間の鍵が違う。`FrontMatter.parse` は 年・期間・効力 のどれが
+        // あっても型を問わず受け取るので、ここを間違えても壊れた節点にはならない——
+        // 出来事のはずが期間を持つ、法律のはずが 効力 の形を失う、というように
+        // **意味が違う節点として素通りしてしまう**(設計書 4.3)。
         let period: String
         switch kind {
         case .event: period = "年: \(year)"
