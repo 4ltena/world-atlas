@@ -33,12 +33,32 @@ struct RelationsTests {
         #expect(names.contains("海都同盟"))         // 相手の 由来 に自分が書かれている側
     }
 
-    @Test("勢力の支配は、支配している場所である")
+    @Test("勢力の支配は、支配している場所である。支配を継承した子孫の場所も含む")
     func polityRules() async throws {
         let s = try await sample()
         let g = Relations.of(s, path: try path(s, "北ヴェルダ王国"), year: 500)
         let names = try #require(g.first { $0.title == "この年の支配" }).nodes.map(\.name)
-        #expect(names == ["北ヴェルダ"])
+        // 北ヴェルダ 自身に加え、支配を継承した子孫の場所（エルデン邑・職人街など）も出る——
+        // 場所→勢力の向き（`rulers(of:at:)`）が継承込みで答えるのと同じ資格判定を、
+        // 勢力→場所の向きにも通したことによる。
+        #expect(names.contains("北ヴェルダ"))
+        #expect(names.contains("王都エルデン"))
+        #expect(names.contains("職人街"))
+    }
+
+    @Test("継承した支配は、両方向から見て一致する")
+    func rulesAgreeInBothDirections() async throws {
+        let s = try await sample()
+        // 職人街 は自分自身に 支配 を持たず、エルデン邑 を経て 北ヴェルダ から継承する
+        // （場所→勢力の向きは元々これを拾う）。逆向きが同じ関数を通るなら、
+        // 北ヴェルダ王国 の一覧にも 職人街 が出るはずである。
+        let workshop = Relations.of(s, path: try path(s, "職人街"), year: 500)
+        let workshopRules = try #require(workshop.first { $0.title == "この年の支配" }).nodes.map(\.name)
+        #expect(workshopRules == ["北ヴェルダ王国"])
+
+        let kingdom = Relations.of(s, path: try path(s, "北ヴェルダ王国"), year: 500)
+        let kingdomRules = try #require(kingdom.first { $0.title == "この年の支配" }).nodes.map(\.name)
+        #expect(kingdomRules.contains("職人街"))
     }
 
     @Test("場所の支配は、支配している勢力である")
@@ -169,6 +189,34 @@ struct RelationsTests {
         let s = try await sample()
         let g = Relations.of(s, path: try path(s, "ヴェルダの分裂"), year: 412)
         #expect(!g.contains { $0.nodes.isEmpty })
+    }
+
+    @Test("同じ節点を保存名と別名の両方でリンクしても、参照されているは一行にまとまる")
+    func backrefsDedupAcrossAliasLinks() async throws {
+        let s = try await TestVault.snapshot([
+            "場所/的.md": """
+            ---
+            名前: 的
+            種別: 都市
+            期間: [1, 現在]
+            別名:
+              - [50, 別名的]
+            ---
+            """,
+            "場所/元.md": """
+            ---
+            名前: 元
+            種別: 区
+            期間: [1, 現在]
+            ---
+            [[的]] と、後で改名した [[別名的]] の両方を書く。同じ節点を指している。
+            """,
+        ])
+        let p = try #require(s.path(ofSavedName: "的"))
+        let g = Relations.of(s, path: p, year: 100)
+        let back = try #require(g.first { $0.title == "参照されている" })
+        #expect(back.nodes.count == 1)
+        #expect(Set(back.nodes.map(\.id)).count == back.nodes.count)
     }
 
     @Test("知らない path では空を返す")

@@ -900,6 +900,25 @@ struct ArrivalStoreTests {
         #expect(a.message.contains("エルデン市"))
     }
 
+    @Test("同じ節点を通常選択してから別名で選び直すと、その別名の案内に切り替わる")
+    func rearrivingWithADifferentNameUpdatesTheArrival() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.setYear(500)
+        let p = try #require(store.snapshot.path(ofSavedName: "エルデン邑"))
+        // まず普通に選ぶ。辿り着いた名前が無いので案内も無い。
+        store.requestSelect(p)
+        #expect(store.arrivedAs == nil)
+        #expect(store.arrival == nil)
+        // 同じ節点を、別名を添えて選び直す。**移動ではないので `select` は通らないが、
+        // 辿り着いた名前は更新される。**
+        store.requestSelect(p, arrivedAs: "エルデン市")
+        #expect(store.selected == p)
+        #expect(store.arrivedAs == "エルデン市")
+        let a = try #require(store.arrival)
+        #expect(a.message.contains("エルデン市"))
+    }
+
     @Test("押すと年が動き、戻る一手が出る")
     func moves() async throws {
         let store = VaultStore(vault: try TestVault.copiedSample())

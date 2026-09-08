@@ -81,7 +81,7 @@ struct TreeRow: View {
                     .foregroundStyle(Palette.warning)
                     .help(Manuscript.flagOrder.filter { node.flags.contains($0) }
                         .map(\.rawValue).joined(separator: "、"))
-            } else if let m = node.matchedName {
+            } else if let m = node.subLabel {
                 Text("⟵ \(m)")
                     .font(.caption)
                     .foregroundStyle(.tertiary)

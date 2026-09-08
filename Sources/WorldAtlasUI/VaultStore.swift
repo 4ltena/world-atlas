@@ -322,7 +322,15 @@ public final class VaultStore {
     /// 節点を選ぶ。**移動の経路はすべてここを通す。**未保存なら尋ねる。
     /// `arrivedAs` は利用者が辿り着いた名前（検索の行、押したリンク）。
     public func requestSelect(_ path: String?, arrivedAs name: String? = nil) {
-        guard path != selected else { return }
+        guard path != selected else {
+            // **同じ節点でも、辿り着いた名前が変われば案内は変わる。**移動ではないので
+            // 関門は通らない。前の案内で移った戻り先は、別の名前で来た時点で意味を失う。
+            if path != nil, name != arrivedAs {
+                arrivedAs = name
+                returnYear = nil
+            }
+            return
+        }
         // **`canSave` を見る。**`isDirty` だけだと、外で消された節点を抱えたまま
         // 文字列を基準へ戻した状態（汚れていないが `changedOutside`）で、唯一の写しを
         // 黙って捨てて移ってしまう。⌘S が書くものを持っているなら、必ず尋ねる。

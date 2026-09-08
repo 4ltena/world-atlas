@@ -9,8 +9,13 @@ public struct TreeNode: Equatable, Identifiable, Sendable {
     public var name: String
     public var category: String
     public var flags: Set<Flag>
-    /// 絞り込みで当たった名前。今の年の呼び名と同じなら nil（設計書 8.2）。
-    /// **行の名前は差し替えない。**7 節の規則を破ると、木と原稿と年表で違う名前が出る。
+    /// 行の右端に薄く添える名前。今の年の呼び名と同じか、祖先としてだけ残った行なら nil
+    /// （設計書 8.2）。**行の名前は差し替えない。**7 節の規則を破ると、木と原稿と年表で違う名前が出る。
+    public var subLabel: String?
+    /// 絞り込みで実際に当たった名前。**今の年の呼び名と同じでも入る。**利用者が辿り着いた
+    /// 名前として `requestSelect(_:arrivedAs:)` へそのまま渡すためのもので、`subLabel` とは
+    /// 別の役目を持つ——副の名前を省く判断と、到達名を覚える判断は別である。
+    /// 祖先としてだけ残った行では nil。
     public var matchedName: String?
     public var children: [TreeNode]
     public var id: String { path }
@@ -22,14 +27,14 @@ public enum Tree {
     /// 全文検索ではない（設計書 8.1）。
     public static func build(_ s: Snapshot, kind: Kind, year: Int, query: String = "") -> [TreeNode] {
         let q = query.trimmingCharacters(in: .whitespaces)
-        // 値は「その行に添える名前」。祖先や、呼び名そのものに当たった行は空文字になる。
-        let hits: [String: String]? = q.isEmpty ? nil : matched(s, kind: kind, query: q, year: year)
+        let hits: [String: RowMatch]? = q.isEmpty ? nil : matched(s, kind: kind, query: q, year: year)
         func row(_ path: String) -> TreeNode? {
             guard let n = s.nodes[path], n.kind == kind else { return nil }
             if let hits, hits[path] == nil { return nil }
             return TreeNode(path: path, name: n.displayName(at: year), category: n.category,
                             flags: n.flags,
-                            matchedName: hits?[path].flatMap { $0.isEmpty ? nil : $0 },
+                            subLabel: hits?[path]?.subLabel,
+                            matchedName: hits?[path]?.matchedName,
                             children: (s.children[path] ?? []).compactMap(row))
         }
         return (s.roots[kind] ?? []).compactMap(row)
@@ -47,15 +52,25 @@ public enum Tree {
         return out
     }
 
+    /// 一行に添える二つの値。祖先としてだけ残った行はどちらも nil。
+    struct RowMatch {
+        /// 実際に当たった名前。今の年の呼び名と同じでも入る（設計書 7 節）。
+        var matchedName: String?
+        /// 行の右端に薄く添える名前。今の年の呼び名と同じなら nil。
+        var subLabel: String?
+    }
+
     /// query に当たった節点と、その祖先すべて。
-    /// 一周目で当たった行だけを入れ、二周目で祖先を足す。当たった行を先に全部入れておかないと、
-    /// 「当たった行 A の祖先を辿る途中で、まだ処理していない当たった行 B に着く」ときに
-    /// B の添える名前が空文字で潰れてしまう（辞書の走査順に依存してしまう）。
-    private static func matched(_ s: Snapshot, kind: Kind, query: String, year: Int) -> [String: String] {
-        var keep: [String: String] = [:]
+    /// 一周目で当たった行だけを入れ、二周目で祖先を足す。**正しさのために二周へ分けているのではない。**
+    /// 当たった行への書き込みは常に無条件の上書きなので、一周に混ぜて「当たり判定の途中で
+    /// 祖先も埋める」形にしても、後で本人の当たりに処理が来た時点で祖先用の空の印はそのまま
+    /// 上書きされる——辞書の走査順に結果は依存しない。二周に分けているのは、
+    /// 「まず当たりを全部確定してから、祖先を辿る」という順のほうが素直に読めるからである。
+    private static func matched(_ s: Snapshot, kind: Kind, query: String, year: Int) -> [String: RowMatch] {
+        var keep: [String: RowMatch] = [:]
         // 一周目。当たった行だけを入れる。
         for (path, n) in s.nodes where n.kind == kind {
-            if let name = hitName(n, query: query, year: year) { keep[path] = name }
+            if let hit = hitName(n, query: query, year: year) { keep[path] = hit }
         }
         // 二周目。祖先を足す。**当たった行は上書きしない。**
         // 親の輪が残っていても止まるよう、辿った path を覚えて二度目で打ち切る。
@@ -63,17 +78,16 @@ public enum Tree {
             var visited: Set<String> = [path]
             var cur = s.nodes[path]?.parentPath
             while let c = cur, visited.insert(c).inserted {
-                if keep[c] == nil { keep[c] = "" }
+                if keep[c] == nil { keep[c] = RowMatch(matchedName: nil, subLabel: nil) }
                 cur = s.nodes[c]?.parentPath
             }
         }
         return keep
     }
 
-    /// 当たったかと、添える名前。当たっていなければ nil、
-    /// 当たったが今の年の呼び名そのものなら空文字を返す。
+    /// 当たったかと、その名前。当たっていなければ nil。
     /// **複数当たったら最も新しい年のものを採る**（設計書 8.1）。
-    static func hitName(_ n: IndexedNode, query: String, year: Int) -> String? {
+    static func hitName(_ n: IndexedNode, query: String, year: Int) -> RowMatch? {
         let display = n.displayName(at: year)
         var hit = false
         // 保存名はどの別名よりも前なので、最も古い。Int.min を置く。
@@ -88,6 +102,8 @@ public enum Tree {
             if best == nil || a.from > best!.from { best = (a.from, a.name) }
         }
         guard hit else { return nil }
-        return best?.name ?? ""
+        // best が無ければ、当たったのは呼び名そのもの——実際に当たった名前は display になる。
+        let matched = best?.name ?? display
+        return RowMatch(matchedName: matched, subLabel: best?.name)
     }
 }

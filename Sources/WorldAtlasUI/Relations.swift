@@ -60,22 +60,27 @@ public enum Relations {
         }
 
         // ── その年の支配。場所なら支配する勢力、勢力なら支配している場所。
+        // **逆向きも `rulers(of:at:)` を通す。**`rules` を直に読むと、自分の子孫が
+        // 支配を継承している場所を見落とす——場所→勢力の向きは継承込みで答えるのに、
+        // 勢力→場所の向きだけ「自身に支配が書いてある節点」しか拾わないのは非対称である。
+        // 同じ関数を両方向に使えば、二つの向きは作りのうえで自動的に一致する。
         var rules: [RelatedNode] = s.rulers(of: path, at: year).compactMap { row($0.path) }
-        for (p, n) in s.nodes.sorted(by: { $0.key < $1.key }) {
-            for r in n.rules where r.from <= year && (r.to.map { year < $0 } ?? true) {
-                guard s.path(ofSavedName: r.polity) == path else { continue }
-                let end = r.to.map { "\($0)" } ?? "現在"
-                if let x = row(p, note: "\(r.from)–\(end)") { rules.append(x) }
-            }
+        for (p, _) in s.nodes.sorted(by: { $0.key < $1.key }) {
+            guard s.rulers(of: p, at: year).contains(where: { $0.path == path }) else { continue }
+            if let x = row(p) { rules.append(x) }
         }
 
+        // **参照している／参照されているにも dedup を掛ける。**別々のリンク文字列
+        // （保存名と別名など）が同じ path へ解決すると、Indexer の逆参照は参照元を
+        // 重ねて追加する——それ自体は正しい（原稿は本当に二度リンクしている）が、
+        // note が常に空なのでここでは id が重なる。行を作る場所でまとめて弾く。
         let out = s.refs[path]?.compactMap { row($0) } ?? []
         let back = s.backrefs[path]?.compactMap { row($0) } ?? []
 
         return [RelationGroup(title: "繋がり", nodes: dedup(lineage)),
                 RelationGroup(title: "この年の支配", nodes: dedup(rules)),
-                RelationGroup(title: "参照している", nodes: out),
-                RelationGroup(title: "参照されている", nodes: back)]
+                RelationGroup(title: "参照している", nodes: dedup(out)),
+                RelationGroup(title: "参照されている", nodes: dedup(back))]
             .filter { !$0.nodes.isEmpty }
     }
 }

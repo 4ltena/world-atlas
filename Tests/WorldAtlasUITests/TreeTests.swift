@@ -102,7 +102,7 @@ struct TreeMatchedNameTests {
         let s = try await TestVault.sample()
         let rows = Tree.build(s, kind: .place, year: 500, query: "エルデン市")
         let row = try #require(find(rows, "王都エルデン"))
-        #expect(row.matchedName == "エルデン市")
+        #expect(row.subLabel == "エルデン市")
     }
 
     @Test("今の年の呼び名で当たったら、何も入らない")
@@ -110,7 +110,7 @@ struct TreeMatchedNameTests {
         let s = try await TestVault.sample()
         let rows = Tree.build(s, kind: .place, year: 500, query: "王都エルデン")
         let row = try #require(find(rows, "王都エルデン"))
-        #expect(row.matchedName == nil)
+        #expect(row.subLabel == nil)
     }
 
     @Test("複数当たったら、最も新しい年のものを採る")
@@ -120,14 +120,14 @@ struct TreeMatchedNameTests {
         // 500 年の呼び名は 王都エルデン なので、残るのは エルデン邑 と エルデン市。
         let rows = Tree.build(s, kind: .place, year: 500, query: "エルデン")
         let row = try #require(find(rows, "王都エルデン"))
-        #expect(row.matchedName == "エルデン市")
+        #expect(row.subLabel == "エルデン市")
     }
 
     @Test("絞り込んでいないときは何も入らない")
     func noQuery() async throws {
         let s = try await TestVault.sample()
         let rows = Tree.build(s, kind: .place, year: 500)
-        #expect(rows.allSatisfy { $0.matchedName == nil })
+        #expect(rows.allSatisfy { $0.subLabel == nil })
     }
 
     @Test("祖先として残っただけの行には何も入らない")
@@ -135,7 +135,7 @@ struct TreeMatchedNameTests {
         let s = try await TestVault.sample()
         let rows = Tree.build(s, kind: .place, year: 500, query: "エルデン市")
         let parent = try #require(rows.first { !$0.children.isEmpty })
-        #expect(parent.matchedName == nil)
+        #expect(parent.subLabel == nil)
     }
 
     @Test("保存名がその年の呼び名そのものなら、副の名前は出ない")
@@ -144,7 +144,7 @@ struct TreeMatchedNameTests {
         // 200 年は改称の前。エルデン邑 の呼び名は保存名そのものである。
         let rows = Tree.build(s, kind: .place, year: 200, query: "エルデン邑")
         let row = try #require(find(rows, "エルデン邑"))
-        #expect(row.matchedName == nil)
+        #expect(row.subLabel == nil)
     }
 
     @Test("当たった行が別の当たった行の祖先でもあるとき、副の名前が消えない")
@@ -172,8 +172,17 @@ struct TreeMatchedNameTests {
         // 北都街 は呼び名そのものに当たったので副は付かない。
         let rows = Tree.build(s, kind: .place, year: 300, query: "北")
         let parent = try #require(find(rows, "北府"))
-        #expect(parent.matchedName == "北都")
+        #expect(parent.subLabel == "北都")
         let child = try #require(find(parent.children, "北都街"))
-        #expect(child.matchedName == nil)
+        #expect(child.subLabel == nil)
+    }
+
+    @Test("今の年の呼び名で検索して当たっても、matchedName にはその名前が残る")
+    func matchedNameSurvivesEvenWhenItEqualsTheDisplayName() async throws {
+        let s = try await TestVault.sample()
+        let rows = Tree.build(s, kind: .place, year: 500, query: "王都エルデン")
+        let row = try #require(find(rows, "王都エルデン"))
+        #expect(row.subLabel == nil)
+        #expect(row.matchedName == "王都エルデン")
     }
 }
