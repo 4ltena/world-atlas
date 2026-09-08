@@ -21,6 +21,11 @@ public struct VaultWindow: View {
                 .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 460)
             } detail: {
                 ManuscriptView(store: store)
+                    .inspector(isPresented: Binding(get: { store.showsInspector },
+                                                    set: { store.showsInspector = $0 })) {
+                        InspectorView(store: store)
+                            .inspectorColumnWidth(min: 240, ideal: 288, max: 420)
+                    }
             }
             .frame(minHeight: 240)
 
