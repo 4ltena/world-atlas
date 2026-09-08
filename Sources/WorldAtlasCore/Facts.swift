@@ -1,3 +1,5 @@
+import Foundation
+
 /// 事実の出どころ。節点の識別子は保存名ではなく vault からの相対パスなので、
 /// 保存名が重複していても総観の行から一つの節点を開ける。
 public struct FactSource: Sendable {
@@ -89,5 +91,21 @@ public enum Facts {
         for f in facts { s += line(f) + "\n" }
         s += "\n"
         return s
+    }
+
+    /// 総観の入力の要約値。生成した文の front matter に書き、次に開いたとき
+    /// 今の材料から取り直した値と比べて「古い」を判定する（設計書 9 節）。
+    ///
+    /// **`hashValue` を使わない。**Swift の `hashValue` はプロセスごとに種が変わるので、
+    /// 起動するたびに全部の年が「古い」になり、待ち行列が無限に回る。FNV-1a の
+    /// 64 ビットを自前で取る。速さは要らない（一年ぶんの入力は数キロバイトである）。
+    public static func digest(_ input: String) -> String {
+        var h: UInt64 = 0xcbf2_9ce4_8422_2325
+        for b in input.utf8 {
+            h ^= UInt64(b)
+            h = h &* 0x0000_0100_0000_01b3
+        }
+        // 16 桁に揃える。先頭の 0 が落ちると、書いた値と読んだ値が食い違う。
+        return String(format: "%016lx", h)
     }
 }
