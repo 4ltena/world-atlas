@@ -137,4 +137,43 @@ struct TreeMatchedNameTests {
         let parent = try #require(rows.first { !$0.children.isEmpty })
         #expect(parent.matchedName == nil)
     }
+
+    @Test("保存名がその年の呼び名そのものなら、副の名前は出ない")
+    func savedNameIsDisplayName() async throws {
+        let s = try await TestVault.sample()
+        // 200 年は改称の前。エルデン邑 の呼び名は保存名そのものである。
+        let rows = Tree.build(s, kind: .place, year: 200, query: "エルデン邑")
+        let row = try #require(find(rows, "エルデン邑"))
+        #expect(row.matchedName == nil)
+    }
+
+    @Test("当たった行が別の当たった行の祖先でもあるとき、副の名前が消えない")
+    func hitThatIsAlsoAnAncestor() async throws {
+        let s = try await TestVault.snapshot([
+            "場所/北都.md": """
+            ---
+            名前: 北都
+            種別: 都市
+            期間: [1, 現在]
+            別名:
+              - [200, 北府]
+            ---
+            """,
+            "場所/北都街.md": """
+            ---
+            名前: 北都街
+            種別: 区
+            期間: [1, 現在]
+            親: 北都
+            ---
+            """,
+        ])
+        // 300 年。「北」は両方に当たる。北都 の呼び名は 北府 なので副に 北都 が付き、
+        // 北都街 は呼び名そのものに当たったので副は付かない。
+        let rows = Tree.build(s, kind: .place, year: 300, query: "北")
+        let parent = try #require(find(rows, "北府"))
+        #expect(parent.matchedName == "北都")
+        let child = try #require(find(parent.children, "北都街"))
+        #expect(child.matchedName == nil)
+    }
 }
