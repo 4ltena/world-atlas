@@ -9,10 +9,11 @@ struct InspectorView: View {
     @Bindable var store: VaultStore
 
     var body: some View {
-        // 材料も総観の状態も一度だけ取る。`overviewState` は取得のたびに材料・入力・
-        // digest を組み直し、材料があれば同期でファイルまで読みに行く(VaultStore.swift)。
-        // 印と本文が別々に読むと、二つの取得の間に外部更新が挟まったとき、
-        // 印と本文が違うファイル状態を指しうる。ここで一度だけ取って両方へ渡す。
+        // `overviewState` は一度だけ取り、印と本文の両方へ同じ値を渡す——別々に
+        // 呼ぶと、二つの取得の間に外部更新が挟まったとき、印と本文が違うファイル
+        // 状態を指しうる(`overviewState` は呼ぶたびに材料からファイルまで読み直す。
+        // VaultStore.swift)。一覧に出す材料は `facts` を直に一度だけ取る——
+        // `overviewState` が内部で組む材料とは別の取得である。
         let facts = store.facts
         let overviewState = store.overviewState
         // 欄の高さを知るために GeometryReader で囲む。総観の上限は「欄の高さの
@@ -48,22 +49,27 @@ struct InspectorView: View {
         .padding(.top, 10)
         .padding(.bottom, 8)
         // ここには高さの上限を置かない。**短い文の年は自然な高さで止まる**——
-        // 上限を VStack の外側に置くと、中の ScrollView が(文が一行でも)
-        // 上限いっぱいまで広がり、年の行が上端から沈み、下の一覧の余地を削る
-        // （2026-09-08 のレビューで確かめられた欠陥）。上限は伸びうる
-        // ScrollView 自身にだけ掛ける。
+        // 上限を VStack の外側に置くと、中身が一行でも上限いっぱいまで広がり、
+        // 年の行が上端から沈み、下の一覧の余地を削る
+        // （2026-09-08 のレビューで確かめられた欠陥）。上限は `text` の中、
+        // 伸びうる側にだけ掛ける。
     }
 
-    /// 本文。**上限は ScrollView 自身に掛ける**——ScrollView は自分から欲張って
-    /// 提案された高さいっぱいまで広がる性質があるので、外側の VStack に上限を
-    /// 置くと短文でもその上限まで空白ができる。ScrollView の無い三状態には
-    /// 上限そのものが無く、内容ぶんだけの高さで止まる。
+    /// 本文。**`ViewThatFits` で「そのまま置いて収まるか」を試す**——一文の要約は
+    /// `ScrollView` に包んだ時点で、ScrollView 自身が「提案された高さいっぱいまで
+    /// 広がる」性質を持つビューになるので、内容が一行でも上限ぶんの空白ができる
+    /// （2026-09-08 の一回目の直しが見落とした点）。`ViewThatFits` は候補の先頭から
+    /// 「提案された縦の広さに、そのままの高さで収まるか」を試し、収まる最初の一つを
+    /// 使う——収まれば裸の `Text`（内容ぶんの高さで止まる）、収まらなければ
+    /// `ScrollView`（外側の `.frame(maxHeight: cap)` まで広がって中で巻く）。
+    /// 提案の出どころは外側の `.frame(maxHeight: cap)`——これが「収まるか」の
+    /// 基準そのものを cap に絞る。
     @ViewBuilder private func text(_ state: OverviewState, cap: Double) -> some View {
         switch state {
         case let .ready(d), let .stale(d):
-            ScrollView {
-                Text(d.text).font(.callout).lineSpacing(4)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            ViewThatFits(in: .vertical) {
+                summary(d.text)
+                ScrollView { summary(d.text) }
             }
             .frame(maxHeight: cap, alignment: .top)
         case .missing:
@@ -73,6 +79,12 @@ struct InspectorView: View {
         case .noMaterial:
             Text("この年の前後に出来事がありません").font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    /// `ViewThatFits` の二つの候補で使う見た目。**同じものを二度書かない。**
+    private func summary(_ text: String) -> some View {
+        Text(text).font(.callout).lineSpacing(4)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// 五状態の印（設計書 8.4）。**菱形は使わない**——年表では菱形が出来事と改称を
