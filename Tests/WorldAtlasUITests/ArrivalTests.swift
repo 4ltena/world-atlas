@@ -79,6 +79,49 @@ struct ArrivalTests {
                                                 arrivedAs: "北ヴェルダ共和国", calendar: cal))
         #expect(a.message.contains("北ヴェルダ共和国"))
         #expect(a.year == ArrivalNotice.middle(from: 501, to: 596))
+        #expect(a.year == 548)
+    }
+
+    @Test("同じ名前へ戻る節点で、いまその名前で呼ばれているなら案内しない")
+    func nameReturnsAndMatchesNow() async throws {
+        let s = try await TestVault.snapshot([
+            "勢力/甲.md": """
+            ---
+            名前: 甲
+            種別: 勢力
+            期間: [100, 600]
+            別名:
+              - [200, 乙]
+              - [400, 甲]
+            ---
+            """,
+        ])
+        let p = try #require(s.path(ofSavedName: "甲"))
+        // 150 年は最初の「甲」の区間。period は新しい [400,600] しか返さないが、
+        // いま画面に出ている名前は 甲 なので、言うことは何も無い。
+        #expect(ArrivalNotice.make(s, path: p, year: 150, arrivedAs: "甲", calendar: cal) == nil)
+        // 300 年は 乙 の区間。ここで 甲 を探したなら案内する。
+        let a = try #require(ArrivalNotice.make(s, path: p, year: 300, arrivedAs: "甲", calendar: cal))
+        #expect(a.year == ArrivalNotice.middle(from: 400, to: 600))
+    }
+
+    @Test("極端な年でも落ちない")
+    func extremeYears() {
+        #expect(ArrivalNotice.middle(from: Int.max, to: Int.max) == Int.max)
+        #expect(ArrivalNotice.middle(from: Int.min, to: Int.min) == Int.min)
+        #expect(ArrivalNotice.middle(from: Int.min, to: 0) == Int.min / 2)
+    }
+
+    @Test("点の節点に名前で辿り着いても、点の文が出る")
+    func namedPoint() async throws {
+        let s = try await TestVault.sample()
+        let p = try #require(s.path(ofSavedName: "ヴェルダの分裂"))
+        let a = try #require(ArrivalNotice.make(s, path: p, year: 500,
+                                                arrivedAs: "ヴェルダの分裂", calendar: cal))
+        #expect(a.year == 412)
+        // **「412–412 年の呼び名です」ではない。**点の文であること。
+        #expect(a.message.contains("412 年の"))
+        #expect(!a.message.contains("412–412"))
     }
 
     @Test("存在していて名前も合っているなら、何も出さない")
