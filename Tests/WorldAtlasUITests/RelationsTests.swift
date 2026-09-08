@@ -131,6 +131,39 @@ struct RelationsTests {
         #expect(Set(rows.map(\.id)).count == rows.count)
     }
 
+    @Test("同じ節点へ別々の由来があるときは、二行とも残る")
+    func twoFactsSameNode() async throws {
+        let s = try await TestVault.snapshot([
+            "勢力/甲.md": """
+            ---
+            名前: 甲
+            種別: 勢力
+            期間: [1, 現在]
+            由来:
+              - [100, 分離, 乙]
+            ---
+            """,
+            "勢力/乙.md": """
+            ---
+            名前: 乙
+            種別: 勢力
+            期間: [1, 現在]
+            由来:
+              - [200, 統合, 甲]
+            ---
+            """,
+        ])
+        let p = try #require(s.path(ofSavedName: "甲"))
+        let g = Relations.of(s, path: p, year: 300)
+        let rows = try #require(g.first { $0.title == "繋がり" }).nodes
+        // 甲 自身の 由来（100 分離）と、乙 の 由来 の逆向き（200 統合）。別々の事実である。
+        #expect(rows.count == 2)
+        #expect(rows.map(\.note).sorted() == ["100 分離", "200 統合"])
+        #expect(Set(rows.map(\.id)).count == 2)
+        // 自分の 由来 が先に来る（設計書 8.4 の順）。
+        #expect(rows.first?.note == "100 分離")
+    }
+
     @Test("空の組は出さない")
     func skipsEmpty() async throws {
         let s = try await sample()

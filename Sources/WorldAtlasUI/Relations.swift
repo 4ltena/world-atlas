@@ -14,7 +14,11 @@ public struct RelatedNode: Equatable, Identifiable, Sendable {
     /// **`path` だけでは足りない。**由来は両方向から来るので、同じ節点が
     /// 「412 分離 ← B」と「596 統合 → B」の二行になることがある。どちらも別の事実で、
     /// 両方出したい。`ForEach` は `id` が重なると行を落とすか二重に描く。
-    public var id: String { path + "|" + note }
+    ///
+    /// **文字列を繋げない。**区切りに使える「絶対に現れない文字」は無い——
+    /// path にも note にも任意の文字が入りうるので、繋げた時点で単射でなくなり、
+    /// 別々の二行が同じ id になって片方が消える。組のまま持てば境目が曖昧にならない。
+    public var id: [String] { [path, note] }
 }
 
 public struct RelationGroup: Equatable, Identifiable, Sendable {
@@ -39,7 +43,7 @@ public enum Relations {
 
         // path と note の両方が一致するときだけ重複として落とす。順は保つ。
         func dedup(_ rows: [RelatedNode]) -> [RelatedNode] {
-            var seen: Set<String> = []
+            var seen: Set<[String]> = []
             return rows.filter { seen.insert($0.id).inserted }
         }
 
