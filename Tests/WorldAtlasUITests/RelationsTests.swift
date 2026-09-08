@@ -101,6 +101,36 @@ struct RelationsTests {
         #expect(newRow?.name == "北ヴェルダ")
     }
 
+    @Test("互いに由来を書き合う二つの節点でも、同じ行が二重に出ない")
+    func mutualLineage() async throws {
+        let s = try await TestVault.snapshot([
+            "勢力/甲.md": """
+            ---
+            名前: 甲
+            種別: 勢力
+            期間: [1, 現在]
+            由来:
+              - [100, 分離, 乙]
+            ---
+            """,
+            "勢力/乙.md": """
+            ---
+            名前: 乙
+            種別: 勢力
+            期間: [1, 現在]
+            由来:
+              - [100, 分離, 甲]
+            ---
+            """,
+        ])
+        let p = try #require(s.path(ofSavedName: "甲"))
+        let g = Relations.of(s, path: p, year: 200)
+        let rows = try #require(g.first { $0.title == "繋がり" }).nodes
+        // 甲 自身の 由来 と、乙 の 由来 の逆向きから、同じ (path, note) が二度来る。
+        #expect(rows.count == 1)
+        #expect(Set(rows.map(\.id)).count == rows.count)
+    }
+
     @Test("空の組は出さない")
     func skipsEmpty() async throws {
         let s = try await sample()
