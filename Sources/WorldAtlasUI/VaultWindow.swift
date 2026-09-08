@@ -53,7 +53,9 @@ public struct VaultWindow: View {
         .environment(\.openURL, OpenURLAction { url in
             // 自分のスキームは必ず自分で受ける。解決先が無ければ何もしない。
             guard let path = NodeURL.path(from: url) else { return .systemAction }
-            if store.snapshot.nodes[path] != nil { store.requestSelect(path) }
+            if store.snapshot.nodes[path] != nil {
+                store.requestSelect(path, arrivedAs: NodeURL.arrivedName(from: url))
+            }
             return .handled
         })
         .overlay {

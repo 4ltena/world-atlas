@@ -886,6 +886,106 @@ import WorldAtlasCore
     }
 }
 
+@Suite("辿り着いた名前と、その年へ移る")
+@MainActor
+struct ArrivalStoreTests {
+    @Test("別名で選ぶと、一行が出る")
+    func notice() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.setYear(500)
+        let p = try #require(store.snapshot.path(ofSavedName: "エルデン邑"))
+        store.requestSelect(p, arrivedAs: "エルデン市")
+        let a = try #require(store.arrival)
+        #expect(a.message.contains("エルデン市"))
+    }
+
+    @Test("押すと年が動き、戻る一手が出る")
+    func moves() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.setYear(500)
+        let p = try #require(store.snapshot.path(ofSavedName: "エルデン邑"))
+        store.requestSelect(p, arrivedAs: "エルデン市")
+        let target = try #require(store.arrival).year
+        store.goToArrivalYear()
+        #expect(store.year == target)
+        #expect(store.returnYear == 500)
+        // 食い違いが解けたので、一行は消えている。
+        #expect(store.arrival == nil)
+    }
+
+    @Test("戻すと元の年に戻り、戻る一手は消える")
+    func returns() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.setYear(500)
+        let p = try #require(store.snapshot.path(ofSavedName: "エルデン邑"))
+        store.requestSelect(p, arrivedAs: "エルデン市")
+        store.goToArrivalYear()
+        store.returnToPreviousYear()
+        #expect(store.year == 500)
+        #expect(store.returnYear == nil)
+    }
+
+    @Test("節点を移ると、辿り着いた名前も戻る一手も捨てる")
+    func clearedOnSelect() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.setYear(500)
+        let p = try #require(store.snapshot.path(ofSavedName: "エルデン邑"))
+        store.requestSelect(p, arrivedAs: "エルデン市")
+        store.goToArrivalYear()
+        let q = try #require(store.snapshot.path(ofSavedName: "職人街"))
+        store.requestSelect(q)
+        #expect(store.arrival == nil)
+        #expect(store.returnYear == nil)
+    }
+
+    @Test("未保存の編集があるときは、三択を抜けてから名前が届く")
+    func throughPassage() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.setYear(500)
+        let first = try #require(store.snapshot.path(ofSavedName: "職人街"))
+        store.requestSelect(first)
+        try await until { store.isTextLoaded }
+        store.editedText = store.editedText + "\n打った。"
+        let p = try #require(store.snapshot.path(ofSavedName: "エルデン邑"))
+        store.requestSelect(p, arrivedAs: "エルデン市")
+        #expect(store.pendingPassage != nil)
+        store.passageDiscardAndGo()
+        #expect(store.selected == p)
+        #expect(store.arrival != nil)
+    }
+
+    @Test("総観の材料は前後 12 年ぶん。501 年の五件が 500 年の材料に入る")
+    func facts() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.setYear(500)
+        let years = Set(store.facts.map(\.year))
+        #expect(years.contains(501))
+        #expect(store.facts.allSatisfy { abs($0.year - 500) <= 12 })
+    }
+
+    @Test("見本には生成済みの文が無いので、未生成である")
+    func overviewNone() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.setYear(500)
+        #expect(store.overviewState == .missing)
+    }
+
+    @Test("何も選んでいなければ関連は空")
+    func relationsEmpty() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.requestSelect(nil)
+        #expect(store.relations.isEmpty)
+    }
+}
+
 /// 条件が成り立つまで、間を置いて確かめる。監視は非同期なので待ちが要る。
 @MainActor
 private func until(_ limit: Duration = .seconds(5), _ cond: () -> Bool) async throws {
