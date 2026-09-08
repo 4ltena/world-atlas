@@ -9,46 +9,63 @@ struct InspectorView: View {
     @Bindable var store: VaultStore
 
     var body: some View {
-        // 材料は一度だけ取る。`overviewState` も内部で同じものを組み立てるので、
-        // 巻きのたびに二度走らせない。
+        // 材料も総観の状態も一度だけ取る。`overviewState` は取得のたびに材料・入力・
+        // digest を組み直し、材料があれば同期でファイルまで読みに行く(VaultStore.swift)。
+        // 印と本文が別々に読むと、二つの取得の間に外部更新が挟まったとき、
+        // 印と本文が違うファイル状態を指しうる。ここで一度だけ取って両方へ渡す。
         let facts = store.facts
-        VStack(alignment: .leading, spacing: 0) {
-            overview
-            tabs
-            switch store.inspectorTab {
-            case .events: events(facts)
-            case .relations: relations
+        let overviewState = store.overviewState
+        // 欄の高さを知るために GeometryReader で囲む。総観の上限は「欄の高さの
+        // およそ 45%」（設計書 8.4、2026-09-08 の裁定）であって固定値ではない——
+        // 欄の高さは畳んだ年表や窓のリサイズで変わるので、比率で決める。
+        GeometryReader { geo in
+            VStack(alignment: .leading, spacing: 0) {
+                overview(overviewState, cap: geo.size.height * 0.45)
+                tabs
+                switch store.inspectorTab {
+                case .events: events(facts)
+                case .relations: relations
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .background(Palette.ground)
     }
 
     // MARK: 総観
 
-    private var overview: some View {
+    private func overview(_ state: OverviewState, cap: Double) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Text(store.calendar.format(store.displayedYear))
                     .font(.custom("HiraMinProN-W6", size: 15))
                 Spacer(minLength: 4)
-                mark
+                mark(state)
             }
-            text
+            text(state, cap: cap)
         }
         .padding(.horizontal, 12)
         .padding(.top, 10)
         .padding(.bottom, 8)
-        // 固定する高さの上限。文が長くても、下の切り替えを押し出さない（設計書 8.4）。
-        .frame(maxHeight: 260)
+        // ここには高さの上限を置かない。**短い文の年は自然な高さで止まる**——
+        // 上限を VStack の外側に置くと、中の ScrollView が(文が一行でも)
+        // 上限いっぱいまで広がり、年の行が上端から沈み、下の一覧の余地を削る
+        // （2026-09-08 のレビューで確かめられた欠陥）。上限は伸びうる
+        // ScrollView 自身にだけ掛ける。
     }
 
-    @ViewBuilder private var text: some View {
-        switch store.overviewState {
+    /// 本文。**上限は ScrollView 自身に掛ける**——ScrollView は自分から欲張って
+    /// 提案された高さいっぱいまで広がる性質があるので、外側の VStack に上限を
+    /// 置くと短文でもその上限まで空白ができる。ScrollView の無い三状態には
+    /// 上限そのものが無く、内容ぶんだけの高さで止まる。
+    @ViewBuilder private func text(_ state: OverviewState, cap: Double) -> some View {
+        switch state {
         case let .ready(d), let .stale(d):
             ScrollView {
                 Text(d.text).font(.callout).lineSpacing(4)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxHeight: cap, alignment: .top)
         case .missing:
             Text("まだ書いていません").font(.caption).foregroundStyle(.secondary)
         case .generating:
@@ -60,8 +77,8 @@ struct InspectorView: View {
 
     /// 五状態の印（設計書 8.4）。**菱形は使わない**——年表では菱形が出来事と改称を
     /// 意味しているので、同じ形に二つ目の意味を持たせない（2026-09-08 に改めた）。
-    @ViewBuilder private var mark: some View {
-        switch store.overviewState {
+    @ViewBuilder private func mark(_ state: OverviewState) -> some View {
+        switch state {
         case .ready:
             Circle().fill(Color.secondary).frame(width: 9, height: 9)
                 .accessibilityLabel("生成済み")
