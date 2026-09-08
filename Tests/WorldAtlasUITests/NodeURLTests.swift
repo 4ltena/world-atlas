@@ -24,3 +24,33 @@ import Testing
         #expect(NodeURL.path(from: URL(string: "worldatlas://year/500")!) == nil)
     }
 }
+
+@Suite("リンクが運ぶ、辿り着いた名前")
+struct NodeURLArrivalTests {
+    @Test("名前を付けて作ると、取り出せる")
+    func roundTrip() throws {
+        let u = NodeURL.make(path: "場所/エルデン邑.md", arrivedAs: "エルデン市")
+        #expect(NodeURL.path(from: u) == "場所/エルデン邑.md")
+        #expect(NodeURL.arrivedName(from: u) == "エルデン市")
+    }
+
+    @Test("名前を付けなければ nil。これまでの URL と同じ形である")
+    func none() throws {
+        let u = NodeURL.make(path: "場所/エルデン邑.md")
+        #expect(NodeURL.arrivedName(from: u) == nil)
+        #expect(u.absoluteString == NodeURL.make(path: "場所/エルデン邑.md").absoluteString)
+    }
+
+    @Test("記号を含む名前でも壊れない")
+    func symbols() throws {
+        let u = NodeURL.make(path: "場所/a.md", arrivedAs: "帝国（北）#1")
+        #expect(NodeURL.path(from: u) == "場所/a.md")
+        #expect(NodeURL.arrivedName(from: u) == "帝国（北）#1")
+    }
+
+    @Test("濁点付きの仮名は、パスと同じく結合形へそろえる")
+    func nfc() throws {
+        let u = NodeURL.make(path: "場所/a.md", arrivedAs: "ヴォルフ商会")
+        #expect(NodeURL.arrivedName(from: u) == "ヴォルフ商会")
+    }
+}

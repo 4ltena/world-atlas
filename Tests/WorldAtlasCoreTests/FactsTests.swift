@@ -58,7 +58,9 @@ import Testing
             FactSource(path: "場所/石橋.md", node: a),
             FactSource(path: "アイテム/石橋.md", node: b),
         ])
-        #expect(f.map(\.path) == ["場所/石橋.md", "アイテム/石橋.md"])
+        // path 昇順（`around` が同年・同種別を path で並べるため）。順そのものは
+        // この試験の主張ではない——二つとも残り、それぞれ別の path を保つことが主張である。
+        #expect(f.map(\.path) == ["アイテム/石橋.md", "場所/石橋.md"])
     }
 
     @Test func linesCarryNameCategoryAndText() {
@@ -83,5 +85,34 @@ import Testing
 
 
         """)
+    }
+}
+
+@Suite("総観の入力の要約値")
+struct FactsDigestTests {
+    /// **既知の値を固定する。**「同じ入力で同じ値」だけでは、プロセスごとに
+    /// 種が変わる実装（`hashValue`）を素通しする——一回の実行の中では一致するからである。
+    /// 下の二つは FNV-1a 64 ビットの標準の検査値である。
+    @Test("空文字と a の要約値は決まった値である")
+    func known() {
+        #expect(Facts.digest("") == "cbf29ce484222325")
+        #expect(Facts.digest("a") == "af63dc4c8601ec8c")
+    }
+
+    @Test("入力が違えば値も違う")
+    func differs() {
+        #expect(Facts.digest("501: 王都エルデン（都市） → エルデン市\n")
+                != Facts.digest("501: 王都エルデン（都市） → エルデン邑\n"))
+    }
+
+    @Test("同じ入力なら何度取っても同じ")
+    func stable() {
+        let s = "412: 北ヴェルダ王国（勢力）成立\n596: 北ヴェルダ共和国（勢力）消滅\n"
+        #expect(Facts.digest(s) == Facts.digest(s))
+    }
+
+    @Test("多バイト文字だけが違っても値が違う")
+    func multibyte() {
+        #expect(Facts.digest("邑") != Facts.digest("市"))
     }
 }

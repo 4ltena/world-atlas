@@ -886,6 +886,162 @@ import WorldAtlasCore
     }
 }
 
+@Suite("辿り着いた名前と、その年へ移る", .serialized)
+@MainActor
+struct ArrivalStoreTests {
+    @Test("別名で選ぶと、一行が出る")
+    func notice() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.setYear(500)
+        let p = try #require(store.snapshot.path(ofSavedName: "エルデン邑"))
+        store.requestSelect(p, arrivedAs: "エルデン市")
+        let a = try #require(store.arrival)
+        #expect(a.message.contains("エルデン市"))
+    }
+
+    @Test("同じ節点を通常選択してから別名で選び直すと、その別名の案内に切り替わる")
+    func rearrivingWithADifferentNameUpdatesTheArrival() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.setYear(500)
+        let p = try #require(store.snapshot.path(ofSavedName: "エルデン邑"))
+        // まず普通に選ぶ。辿り着いた名前が無いので案内も無い。
+        store.requestSelect(p)
+        #expect(store.arrivedAs == nil)
+        #expect(store.arrival == nil)
+        // 同じ節点を、別名を添えて選び直す。**移動ではないので `select` は通らないが、
+        // 辿り着いた名前は更新される。**
+        store.requestSelect(p, arrivedAs: "エルデン市")
+        #expect(store.selected == p)
+        #expect(store.arrivedAs == "エルデン市")
+        let a = try #require(store.arrival)
+        #expect(a.message.contains("エルデン市"))
+    }
+
+    @Test("押すと年が動き、戻る一手が出る")
+    func moves() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.setYear(500)
+        let p = try #require(store.snapshot.path(ofSavedName: "エルデン邑"))
+        store.requestSelect(p, arrivedAs: "エルデン市")
+        let target = try #require(store.arrival).year
+        store.goToArrivalYear()
+        #expect(store.year == target)
+        #expect(store.returnYear == 500)
+        // 食い違いが解けたので、一行は消えている。
+        #expect(store.arrival == nil)
+    }
+
+    @Test("戻すと元の年に戻り、戻る一手は消える")
+    func returns() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.setYear(500)
+        let p = try #require(store.snapshot.path(ofSavedName: "エルデン邑"))
+        store.requestSelect(p, arrivedAs: "エルデン市")
+        store.goToArrivalYear()
+        store.returnToPreviousYear()
+        #expect(store.year == 500)
+        #expect(store.returnYear == nil)
+    }
+
+    @Test("節点を移ると、辿り着いた名前も戻る一手も捨てる")
+    func clearedOnSelect() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.setYear(500)
+        let p = try #require(store.snapshot.path(ofSavedName: "エルデン邑"))
+        store.requestSelect(p, arrivedAs: "エルデン市")
+        store.goToArrivalYear()
+        let q = try #require(store.snapshot.path(ofSavedName: "職人街"))
+        store.requestSelect(q)
+        #expect(store.arrivedAs == nil)
+        #expect(store.arrival == nil)
+        #expect(store.returnYear == nil)
+    }
+
+    @Test("未保存の編集があるときは、三択を抜けてから名前が届く")
+    func throughPassage() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.setYear(500)
+        let first = try #require(store.snapshot.path(ofSavedName: "職人街"))
+        store.requestSelect(first)
+        try await until { store.isTextLoaded }
+        store.editedText = store.editedText + "\n打った。"
+        let p = try #require(store.snapshot.path(ofSavedName: "エルデン邑"))
+        store.requestSelect(p, arrivedAs: "エルデン市")
+        #expect(store.pendingPassage != nil)
+        store.passageDiscardAndGo()
+        #expect(store.selected == p)
+        #expect(store.arrival != nil)
+    }
+
+    @Test("保留中の名前は、途中で割り込んだ別の要求に上書きされない")
+    func pendingSurvivesAnInterruption() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.setYear(500)
+        let a = try #require(store.snapshot.path(ofSavedName: "職人街"))
+        store.requestSelect(a)
+        try await until { store.isTextLoaded }
+        store.editedText = store.editedText + "\n打った。"
+        // B を要求すると、未保存があるので関門で待たされる。
+        let b = try #require(store.snapshot.path(ofSavedName: "エルデン邑"))
+        store.requestSelect(b, arrivedAs: "エルデン市")
+        #expect(store.pendingPassage != nil)
+        // 関門を抜けずに保存だけ済ませる。ここで下書きは綺麗になり `canSave` は偽になる。
+        #expect(store.save())
+        // 存在しないパスへの要求が割り込む。`canSave` が偽なので関門を通らず、
+        // その場で `select` を試みて（無い節点なので）黙って何もしない。
+        store.requestSelect("存在しない/なんとか.md", arrivedAs: "割り込みの名前")
+        // B の問いはまだ残っている——割り込みに answered 済みと誤認してはいけない。
+        #expect(store.pendingPassage != nil)
+        store.passageDiscardAndGo()
+        // 届く名前は B のものであって、割り込んだ要求の名前ではない。
+        #expect(store.selected == b)
+        #expect(store.arrivedAs == "エルデン市")
+    }
+
+    @Test("総観の材料は前後 12 年ぶん。501 年の五件が 500 年の材料に入る")
+    func facts() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.setYear(500)
+        let years = Set(store.facts.map(\.year))
+        #expect(years.contains(501))
+        #expect(store.facts.allSatisfy { abs($0.year - 500) <= 12 })
+    }
+
+    @Test("同じ年の材料は path の順に並ぶ。辞書の列挙順に依存しない")
+    func factsAreOrdered() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.setYear(501)
+        let sameYear = store.facts.filter { $0.year == 501 }
+        #expect(sameYear.count > 1)          // 場面が実在することを先に確かめる
+        #expect(sameYear.map(\.path) == sameYear.map(\.path).sorted())
+    }
+
+    @Test("見本には生成済みの文が無いので、未生成である")
+    func overviewNone() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.setYear(500)
+        #expect(store.overviewState == .missing)
+    }
+
+    @Test("何も選んでいなければ関連は空")
+    func relationsEmpty() async throws {
+        let store = VaultStore(vault: try TestVault.copiedSample())
+        await store.load()
+        store.requestSelect(nil)
+        #expect(store.relations.isEmpty)
+    }
+}
+
 /// 条件が成り立つまで、間を置いて確かめる。監視は非同期なので待ちが要る。
 @MainActor
 private func until(_ limit: Duration = .seconds(5), _ cond: () -> Bool) async throws {

@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// この段で動く操作だけをメニューに置く（設計書 8.1）。
-/// 残るのは右の欄 ⌥⌘I（Stage 5）と設定 ⌘,（Stage 6）だけである。
+/// 残るのは設定 ⌘,（Stage 6）だけである。
 public struct AppCommands: Commands {
     @Environment(\.openWindow) private var openWindow
     @FocusedValue(\.vaultStore) private var store
@@ -34,6 +34,12 @@ public struct AppCommands: Commands {
             .keyboardShortcut("e", modifiers: [.option, .command])
             // 壊れた節点は原文だけが使えるので、切り替えられない（設計書 4.4）。
             .disabled(store == nil || store?.isBroken == true)
+
+            Button(store?.showsInspector == true ? "右の欄を隠す" : "右の欄を表示") {
+                store?.showsInspector.toggle()
+            }
+            .keyboardShortcut("i", modifiers: [.option, .command])
+            .disabled(store == nil)
 
             Button(store?.timelineCollapsed == true ? "年表を表示" : "年表を隠す") {
                 store?.timelineCollapsed.toggle()

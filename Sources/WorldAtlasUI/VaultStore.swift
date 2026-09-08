@@ -63,6 +63,73 @@ public final class VaultStore {
 
     public var blocks: [RenderedBlock] { BodyRenderer.render(text, snapshot: snapshot, year: displayedYear) }
 
+    // MARK: 探した名前と、その年へ移る（設計書 7 節、8.3）
+
+    /// 利用者がどの名前で辿り着いたか。検索で打った語、押したリンクの語である。
+    /// **選択と年からは復元できない**ので、状態として持つ（設計書 7 節）。
+    public private(set) var arrivedAs: String?
+    /// 三択を抜けてから届ける分。関門で待たされる間、行き先と一緒に控えておく。
+    private var pendingArrivedAs: String?
+    /// 「その年へ移る」を押す前の年。⟲ で戻す。**一往復だけで、履歴は作らない。**
+    public private(set) var returnYear: Int?
+
+    /// 原稿の見出しの下に出す一行。要らなければ nil。
+    public var arrival: Arrival? {
+        guard let p = selected else { return nil }
+        return ArrivalNotice.make(snapshot, path: p, year: displayedYear,
+                                  arrivedAs: arrivedAs, calendar: calendar)
+    }
+
+    /// 「その年へ移る」。**押したときだけ年が動く**（設計書 8.3）。
+    public func goToArrivalYear() {
+        guard let a = arrival else { return }
+        let before = year
+        setYear(a.year)
+        // **動かなかったなら、前の戻り先を残す。**端で丸められて年が変わらなかっただけで、
+        // 先に押して得た戻り先まで捨てると、元の年へ帰る手段が消える。
+        // **意図して試験で覆っていない。**通常の経路では一度動くと食い違いが解けて
+        // `arrival` が nil になり、二度目の呼び出しは上の guard で先に止まる——ここへ
+        // 来るには、期間の真ん中が世界の外に出るような壊れた front matter（逆転した
+        // 期間）を要る。そのための見本を試験に混ぜてまで守る一行ではない。
+        guard year != before else { return }
+        returnYear = before
+    }
+
+    /// 「⟲ 元の年へ移る」。
+    public func returnToPreviousYear() {
+        guard let y = returnYear else { return }
+        returnYear = nil
+        setYear(y)
+    }
+
+    // MARK: 右の欄（設計書 8.4、9 節）
+
+    /// 右の欄を出しているか。⌥⌘I で切り替える。
+    public var showsInspector = true
+    /// 下半分に出しているもの。**窓の中では覚えるが、state.json には入れない**
+    /// （設計書 8.4）。次の起動は「この年のできごと」から始まる。
+    public enum InspectorTab: Sendable, Equatable { case events, relations }
+    public var inspectorTab: InspectorTab = .events
+
+    /// 総観の材料。前後 12 年（設計書 9 節）。
+    public var facts: [Fact] {
+        Facts.around(year: displayedYear, window: 12,
+                     sources: snapshot.nodes.map { FactSource(path: $0.key, node: $0.value.asNode) })
+    }
+
+    /// 総観の状態。**生成はしない**（Stage 6）。読んで、今の材料と比べるだけである。
+    public var overviewState: OverviewState {
+        let f = facts
+        let input = Facts.overviewInput(year: displayedYear, window: 12, facts: f, calendar: calendar)
+        return OverviewStore.state(vault: vault, year: displayedYear,
+                                   digest: Facts.digest(input), hasMaterial: !f.isEmpty)
+    }
+
+    /// 関連の四種。何も選んでいないときは空。
+    public var relations: [RelationGroup] {
+        selected.map { Relations.of(snapshot, path: $0, year: displayedYear) } ?? []
+    }
+
     // MARK: 編集（設計書 8.3）
 
     /// ⌘N の入力欄を出しているか。
@@ -253,13 +320,26 @@ public final class VaultStore {
     public private(set) var pendingPassage: Passage?
 
     /// 節点を選ぶ。**移動の経路はすべてここを通す。**未保存なら尋ねる。
-    public func requestSelect(_ path: String?) {
-        guard path != selected else { return }
+    /// `arrivedAs` は利用者が辿り着いた名前（検索の行、押したリンク）。
+    public func requestSelect(_ path: String?, arrivedAs name: String? = nil) {
+        guard path != selected else {
+            // **同じ節点でも、辿り着いた名前が変われば案内は変わる。**移動ではないので
+            // 関門は通らない。前の案内で移った戻り先は、別の名前で来た時点で意味を失う。
+            if path != nil, name != arrivedAs {
+                arrivedAs = name
+                returnYear = nil
+            }
+            return
+        }
         // **`canSave` を見る。**`isDirty` だけだと、外で消された節点を抱えたまま
         // 文字列を基準へ戻した状態（汚れていないが `changedOutside`）で、唯一の写しを
         // 黙って捨てて移ってしまう。⌘S が書くものを持っているなら、必ず尋ねる。
-        guard canSave else { return select(path) }
+        guard canSave else { return select(path, arrivedAs: name) }
+        // **`pendingArrivedAs` は関門を通す要求だけに立てる。**先に立てて後から
+        // `canSave` を見ると、拒否された要求の名前が残ったまま次の要求の行き先へ
+        // 紛れ込む（保留中に別の要求が来て、間に合わなかった要求の名前だけ生き残る）。
         pendingPassage = .node(path)
+        pendingArrivedAs = name
     }
 
     /// 「保存して移る」。**通らなければ移らず、問いを残す。**
@@ -282,8 +362,10 @@ public final class VaultStore {
     private func commitPassage() {
         guard let p = pendingPassage else { return }
         pendingPassage = nil
+        let name = pendingArrivedAs
+        pendingArrivedAs = nil
         switch p {
-        case let .node(path): select(path)
+        case let .node(path): select(path, arrivedAs: name)
         case .closeWindow: closeAfterPassage()      // 課題 6
         }
     }
@@ -331,7 +413,7 @@ public final class VaultStore {
     }
 
     /// 関門を抜けた後にだけ呼ぶ。**外からは `requestSelect(_:)` を使う。**
-    func select(_ path: String?) {
+    func select(_ path: String?, arrivedAs name: String? = nil) {
         guard path != selected else { return }
         if let path {
             guard let n = snapshot.nodes[path] else { return }
@@ -348,6 +430,9 @@ public final class VaultStore {
         draft = nil
         saveError = nil
         changedOutside = false
+        // 辿り着いた名前は選択と寿命を共にする。戻る一手も同じ（設計書 7 節）。
+        arrivedAs = name
+        returnYear = nil
         selected = path
         var st = VaultState.read(vault: vault)
         st.openNode = path
@@ -617,6 +702,8 @@ public final class VaultStore {
                 draft = nil
                 saveError = nil
                 changedOutside = false
+                arrivedAs = nil
+                returnYear = nil
             }
         }
         textToken += 1

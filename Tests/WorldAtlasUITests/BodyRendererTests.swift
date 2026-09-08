@@ -29,7 +29,7 @@ import WorldAtlasCore
         let s = try await TestVault.sample()
         let bs = BodyRenderer.render("鉄は[[職人街]]で打たれる。", snapshot: s, year: 500)
         #expect(text(bs[0]) == "鉄は職人街で打たれる。")
-        #expect(links(bs[0]) == [NodeURL.make(path: "場所/職人街.md")])
+        #expect(links(bs[0]) == [NodeURL.make(path: "場所/職人街.md", arrivedAs: "職人街")])
     }
 
     @Test func linkTextIsTheNameOfTheYear() async throws {
@@ -44,7 +44,7 @@ import WorldAtlasCore
         let s = try await TestVault.sample()
         let b = BodyRenderer.render("[[王都エルデン]]へ。", snapshot: s, year: 600)[0]
         #expect(text(b) == "エルデン市へ。")
-        #expect(links(b) == [NodeURL.make(path: "場所/エルデン邑.md")])
+        #expect(links(b) == [NodeURL.make(path: "場所/エルデン邑.md", arrivedAs: "王都エルデン")])
     }
 
     @Test func unresolvedLinkStaysAsPlainText() async throws {
@@ -66,8 +66,8 @@ import WorldAtlasCore
         let s = try await TestVault.sample()
         let b = BodyRenderer.render("[[鉄鎚亭]]と[[三日月書肆]]。", snapshot: s, year: 500)[0]
         #expect(text(b) == "鉄鎚亭と三日月書肆。")
-        #expect(links(b) == [NodeURL.make(path: "場所/鉄鎚亭.md"),
-                             NodeURL.make(path: "場所/三日月書肆.md")])
+        #expect(links(b) == [NodeURL.make(path: "場所/鉄鎚亭.md", arrivedAs: "鉄鎚亭"),
+                             NodeURL.make(path: "場所/三日月書肆.md", arrivedAs: "三日月書肆")])
     }
 
     @Test func unclosedBracketsAreLeftAlone() async throws {

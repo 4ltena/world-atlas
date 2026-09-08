@@ -21,6 +21,11 @@ public struct VaultWindow: View {
                 .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 460)
             } detail: {
                 ManuscriptView(store: store)
+                    .inspector(isPresented: Binding(get: { store.showsInspector },
+                                                    set: { store.showsInspector = $0 })) {
+                        InspectorView(store: store)
+                            .inspectorColumnWidth(min: 240, ideal: 288, max: 420)
+                    }
             }
             .frame(minHeight: 240)
 
@@ -53,7 +58,9 @@ public struct VaultWindow: View {
         .environment(\.openURL, OpenURLAction { url in
             // 自分のスキームは必ず自分で受ける。解決先が無ければ何もしない。
             guard let path = NodeURL.path(from: url) else { return .systemAction }
-            if store.snapshot.nodes[path] != nil { store.requestSelect(path) }
+            if store.snapshot.nodes[path] != nil {
+                store.requestSelect(path, arrivedAs: NodeURL.arrivedName(from: url))
+            }
             return .handled
         })
         .overlay {

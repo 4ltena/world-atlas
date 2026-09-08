@@ -29,6 +29,11 @@ struct ManuscriptView: View {
             // 節点を作ったが開けなかった理由。シートは閉じた後なので、木の右側で拾う
             // （設計書 8.3）。表示・原文どちらの区分けでも見えるよう、切り替えの外に置く。
             if let e = store.creationError { notice(e) }
+            if let a = store.arrival {
+                arrivalRow(a)
+            } else if let y = store.returnYear {
+                returnRow(y)
+            }
             if store.showsRawEffectively { raw } else { rendered }
         }
         .background(Palette.ground)
@@ -66,6 +71,38 @@ struct ManuscriptView: View {
         }
         .font(.caption)
         .foregroundStyle(Palette.warning)
+        .padding(.horizontal, 40)
+        .padding(.vertical, 8)
+        .background(Palette.veil)
+    }
+
+    /// 探した名前が今の年に無いときの一行（設計書 8.3）。
+    private func arrivalRow(_ a: Arrival) -> some View {
+        HStack(spacing: 8) {
+            Text(a.message)
+            Button("その年へ移る") { store.goToArrivalYear() }
+                .buttonStyle(.plain)
+                .foregroundStyle(Palette.accent)
+                .fontWeight(.semibold)
+            Spacer(minLength: 0)
+        }
+        .font(.caption)
+        .padding(.horizontal, 40)
+        .padding(.vertical, 8)
+        .background(Palette.veil)
+    }
+
+    /// 移ったあと。**行が増えるのではなく、同じ一行が入れ替わる**（設計書 8.3）。
+    private func returnRow(_ y: Int) -> some View {
+        HStack(spacing: 8) {
+            Text("年を \(store.calendar.short(store.year)) にした")
+            Button("⟲ \(store.calendar.short(y)) 年へ移る") { store.returnToPreviousYear() }
+                .buttonStyle(.plain)
+                .foregroundStyle(Palette.accent)
+                .fontWeight(.semibold)
+            Spacer(minLength: 0)
+        }
+        .font(.caption)
         .padding(.horizontal, 40)
         .padding(.vertical, 8)
         .background(Palette.veil)

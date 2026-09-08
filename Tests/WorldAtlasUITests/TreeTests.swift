@@ -85,3 +85,104 @@ import WorldAtlasCore
         return nil
     }
 }
+
+@Suite("絞り込みで当たった名前")
+struct TreeMatchedNameTests {
+
+    private func find(_ rows: [TreeNode], _ name: String) -> TreeNode? {
+        for r in rows {
+            if r.name == name { return r }
+            if let x = find(r.children, name) { return x }
+        }
+        return nil
+    }
+
+    @Test("今の年の呼び名と違う名前で当たったら、その名前が入る")
+    func differs() async throws {
+        let s = try await TestVault.sample()
+        let rows = Tree.build(s, kind: .place, year: 500, query: "エルデン市")
+        let row = try #require(find(rows, "王都エルデン"))
+        #expect(row.subLabel == "エルデン市")
+    }
+
+    @Test("今の年の呼び名で当たったら、何も入らない")
+    func same() async throws {
+        let s = try await TestVault.sample()
+        let rows = Tree.build(s, kind: .place, year: 500, query: "王都エルデン")
+        let row = try #require(find(rows, "王都エルデン"))
+        #expect(row.subLabel == nil)
+    }
+
+    @Test("複数当たったら、最も新しい年のものを採る")
+    func newest() async throws {
+        let s = try await TestVault.sample()
+        // 「エルデン」は 保存名 エルデン邑・王都エルデン・エルデン市 の三つに当たる。
+        // 500 年の呼び名は 王都エルデン なので、残るのは エルデン邑 と エルデン市。
+        let rows = Tree.build(s, kind: .place, year: 500, query: "エルデン")
+        let row = try #require(find(rows, "王都エルデン"))
+        #expect(row.subLabel == "エルデン市")
+    }
+
+    @Test("絞り込んでいないときは何も入らない")
+    func noQuery() async throws {
+        let s = try await TestVault.sample()
+        let rows = Tree.build(s, kind: .place, year: 500)
+        #expect(rows.allSatisfy { $0.subLabel == nil })
+    }
+
+    @Test("祖先として残っただけの行には何も入らない")
+    func ancestor() async throws {
+        let s = try await TestVault.sample()
+        let rows = Tree.build(s, kind: .place, year: 500, query: "エルデン市")
+        let parent = try #require(rows.first { !$0.children.isEmpty })
+        #expect(parent.subLabel == nil)
+    }
+
+    @Test("保存名がその年の呼び名そのものなら、副の名前は出ない")
+    func savedNameIsDisplayName() async throws {
+        let s = try await TestVault.sample()
+        // 200 年は改称の前。エルデン邑 の呼び名は保存名そのものである。
+        let rows = Tree.build(s, kind: .place, year: 200, query: "エルデン邑")
+        let row = try #require(find(rows, "エルデン邑"))
+        #expect(row.subLabel == nil)
+    }
+
+    @Test("当たった行が別の当たった行の祖先でもあるとき、副の名前が消えない")
+    func hitThatIsAlsoAnAncestor() async throws {
+        let s = try await TestVault.snapshot([
+            "場所/北都.md": """
+            ---
+            名前: 北都
+            種別: 都市
+            期間: [1, 現在]
+            別名:
+              - [200, 北府]
+            ---
+            """,
+            "場所/北都街.md": """
+            ---
+            名前: 北都街
+            種別: 区
+            期間: [1, 現在]
+            親: 北都
+            ---
+            """,
+        ])
+        // 300 年。「北」は両方に当たる。北都 の呼び名は 北府 なので副に 北都 が付き、
+        // 北都街 は呼び名そのものに当たったので副は付かない。
+        let rows = Tree.build(s, kind: .place, year: 300, query: "北")
+        let parent = try #require(find(rows, "北府"))
+        #expect(parent.subLabel == "北都")
+        let child = try #require(find(parent.children, "北都街"))
+        #expect(child.subLabel == nil)
+    }
+
+    @Test("今の年の呼び名で検索して当たっても、matchedName にはその名前が残る")
+    func matchedNameSurvivesEvenWhenItEqualsTheDisplayName() async throws {
+        let s = try await TestVault.sample()
+        let rows = Tree.build(s, kind: .place, year: 500, query: "王都エルデン")
+        let row = try #require(find(rows, "王都エルデン"))
+        #expect(row.subLabel == nil)
+        #expect(row.matchedName == "王都エルデン")
+    }
+}

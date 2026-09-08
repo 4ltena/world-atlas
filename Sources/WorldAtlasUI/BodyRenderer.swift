@@ -41,7 +41,8 @@ public enum BodyRenderer {
             md += String(text[i..<open.lowerBound])
             let raw = String(text[open.upperBound..<close.lowerBound])
             if let path = s.path(ofName: raw), let n = s.nodes[path] {
-                md += "[\(escaped(n.displayName(at: year)))](\(NodeURL.make(path: path).absoluteString))"
+                // 利用者が書いた語をそのまま運ぶ。呼び名と違えば、押した先で一行が出る。
+                md += "[\(escaped(n.displayName(at: year)))](\(NodeURL.make(path: path, arrivedAs: raw).absoluteString))"
             } else {
                 // 解決できないものは文字のまま出す。角括弧を逃がして、参照の記法として
                 // 読まれないようにする。
