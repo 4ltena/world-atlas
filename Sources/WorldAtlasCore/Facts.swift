@@ -70,11 +70,15 @@ public enum Facts {
                 add(fact(m.year, m.label))
             }
         }
-        // 年順。同年は点の出来事を先に、あとは sources の並びを保つ。
+        // 年順。同年は点の出来事を先に、あとは path 昇順。**呼ぶ側の並びに任せない。**
+        // sources は辞書（snapshot.nodes）から作られることが多く、その列挙順は
+        // 索引を作り直すたびに変わりうる。ここで並びを決め切っておけば、要約値
+        // （digest）も画面の「この年のできごと」欄も、索引を作り直すたびに勝手に
+        // 入れ替わることがない。
         return out.enumerated().sorted { a, b in
             if a.element.year != b.element.year { return a.element.year < b.element.year }
             if isPoint[a.offset] != isPoint[b.offset] { return isPoint[a.offset] }
-            return a.offset < b.offset
+            return a.element.path < b.element.path
         }.map(\.element)
     }
 

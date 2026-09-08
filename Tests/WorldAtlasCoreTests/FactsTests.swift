@@ -58,7 +58,9 @@ import Testing
             FactSource(path: "場所/石橋.md", node: a),
             FactSource(path: "アイテム/石橋.md", node: b),
         ])
-        #expect(f.map(\.path) == ["場所/石橋.md", "アイテム/石橋.md"])
+        // path 昇順（`around` が同年・同種別を path で並べるため）。順そのものは
+        // この試験の主張ではない——二つとも残り、それぞれ別の path を保つことが主張である。
+        #expect(f.map(\.path) == ["アイテム/石橋.md", "場所/石橋.md"])
     }
 
     @Test func linesCarryNameCategoryAndText() {

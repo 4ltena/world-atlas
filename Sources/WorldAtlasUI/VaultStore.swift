@@ -85,8 +85,14 @@ public final class VaultStore {
         guard let a = arrival else { return }
         let before = year
         setYear(a.year)
-        // 端で止められて動かなかったなら、戻る一手も出さない。
-        returnYear = year == before ? nil : before
+        // **動かなかったなら、前の戻り先を残す。**端で丸められて年が変わらなかっただけで、
+        // 先に押して得た戻り先まで捨てると、元の年へ帰る手段が消える。
+        // **意図して試験で覆っていない。**通常の経路では一度動くと食い違いが解けて
+        // `arrival` が nil になり、二度目の呼び出しは上の guard で先に止まる——ここへ
+        // 来るには、期間の真ん中が世界の外に出るような壊れた front matter（逆転した
+        // 期間）を要る。そのための見本を試験に混ぜてまで守る一行ではない。
+        guard year != before else { return }
+        returnYear = before
     }
 
     /// 「⟲ 元の年へ移る」。
@@ -317,12 +323,15 @@ public final class VaultStore {
     /// `arrivedAs` は利用者が辿り着いた名前（検索の行、押したリンク）。
     public func requestSelect(_ path: String?, arrivedAs name: String? = nil) {
         guard path != selected else { return }
-        pendingArrivedAs = name
         // **`canSave` を見る。**`isDirty` だけだと、外で消された節点を抱えたまま
         // 文字列を基準へ戻した状態（汚れていないが `changedOutside`）で、唯一の写しを
         // 黙って捨てて移ってしまう。⌘S が書くものを持っているなら、必ず尋ねる。
-        guard canSave else { return select(path) }
+        guard canSave else { return select(path, arrivedAs: name) }
+        // **`pendingArrivedAs` は関門を通す要求だけに立てる。**先に立てて後から
+        // `canSave` を見ると、拒否された要求の名前が残ったまま次の要求の行き先へ
+        // 紛れ込む（保留中に別の要求が来て、間に合わなかった要求の名前だけ生き残る）。
         pendingPassage = .node(path)
+        pendingArrivedAs = name
     }
 
     /// 「保存して移る」。**通らなければ移らず、問いを残す。**
@@ -345,8 +354,10 @@ public final class VaultStore {
     private func commitPassage() {
         guard let p = pendingPassage else { return }
         pendingPassage = nil
+        let name = pendingArrivedAs
+        pendingArrivedAs = nil
         switch p {
-        case let .node(path): select(path)
+        case let .node(path): select(path, arrivedAs: name)
         case .closeWindow: closeAfterPassage()      // 課題 6
         }
     }
@@ -394,7 +405,7 @@ public final class VaultStore {
     }
 
     /// 関門を抜けた後にだけ呼ぶ。**外からは `requestSelect(_:)` を使う。**
-    func select(_ path: String?) {
+    func select(_ path: String?, arrivedAs name: String? = nil) {
         guard path != selected else { return }
         if let path {
             guard let n = snapshot.nodes[path] else { return }
@@ -412,8 +423,7 @@ public final class VaultStore {
         saveError = nil
         changedOutside = false
         // 辿り着いた名前は選択と寿命を共にする。戻る一手も同じ（設計書 7 節）。
-        arrivedAs = pendingArrivedAs
-        pendingArrivedAs = nil
+        arrivedAs = name
         returnYear = nil
         selected = path
         var st = VaultState.read(vault: vault)
