@@ -11,7 +11,10 @@ public struct RelatedNode: Equatable, Identifiable, Sendable {
     public var note: String
     /// 年カーソルの年に存在しないなら真。薄く出す。
     public var absent: Bool
-    public var id: String { path }
+    /// **`path` だけでは足りない。**由来は両方向から来るので、同じ節点が
+    /// 「412 分離 ← B」と「596 統合 → B」の二行になることがある。どちらも別の事実で、
+    /// 両方出したい。`ForEach` は `id` が重なると行を落とすか二重に描く。
+    public var id: String { path + "|" + note }
 }
 
 public struct RelationGroup: Equatable, Identifiable, Sendable {
@@ -32,6 +35,12 @@ public enum Relations {
             guard let n = s.nodes[p] else { return nil }
             return RelatedNode(path: p, name: n.displayName(at: year), note: note,
                                absent: !n.exists(at: year))
+        }
+
+        // path と note の両方が一致するときだけ重複として落とす。順は保つ。
+        func dedup(_ rows: [RelatedNode]) -> [RelatedNode] {
+            var seen: Set<String> = []
+            return rows.filter { seen.insert($0.id).inserted }
         }
 
         // ── 繋がり。由来の両方向（設計書 8.4）。
@@ -59,8 +68,8 @@ public enum Relations {
         let out = s.refs[path]?.compactMap { row($0) } ?? []
         let back = s.backrefs[path]?.compactMap { row($0) } ?? []
 
-        return [RelationGroup(title: "繋がり", nodes: lineage),
-                RelationGroup(title: "この年の支配", nodes: rules),
+        return [RelationGroup(title: "繋がり", nodes: dedup(lineage)),
+                RelationGroup(title: "この年の支配", nodes: dedup(rules)),
                 RelationGroup(title: "参照している", nodes: out),
                 RelationGroup(title: "参照されている", nodes: back)]
             .filter { !$0.nodes.isEmpty }

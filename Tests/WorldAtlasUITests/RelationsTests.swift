@@ -77,6 +77,30 @@ struct RelationsTests {
         #expect(!names.contains("海都同盟"))
     }
 
+    @Test("参照しているは、本文のリンク先である。その年の呼び名で出る")
+    func outgoingRefs() async throws {
+        let s = try await sample()
+        let g = Relations.of(s, path: try path(s, "北ヴェルダ王国"), year: 500)
+        let refs = try #require(g.first { $0.title == "参照している" })
+        // 北ヴェルダ王国 の本文は [[エルデン邑]] を指す。500 年の呼び名は 王都エルデン。
+        #expect(refs.nodes.map(\.name).contains("王都エルデン"))
+    }
+
+    @Test("支配の逆走査は境界年で切り替わる。596 年ちょうどは海都同盟の側")
+    func rulesReverseScanBoundary() async throws {
+        let s = try await sample()
+        let northVerda = try path(s, "北ヴェルダ")
+
+        let old = Relations.of(s, path: try path(s, "北ヴェルダ王国"), year: 596)
+        let oldNames = old.first { $0.title == "この年の支配" }?.nodes.map(\.path) ?? []
+        #expect(!oldNames.contains(northVerda))   // 区間は [412, 596) で閉じている
+
+        let new = Relations.of(s, path: try path(s, "海都同盟"), year: 596)
+        let newRow = try #require(new.first { $0.title == "この年の支配" }).nodes
+            .first { $0.path == northVerda }
+        #expect(newRow?.name == "北ヴェルダ")
+    }
+
     @Test("空の組は出さない")
     func skipsEmpty() async throws {
         let s = try await sample()
