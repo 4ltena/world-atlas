@@ -85,3 +85,56 @@ import WorldAtlasCore
         return nil
     }
 }
+
+@Suite("絞り込みで当たった名前")
+struct TreeMatchedNameTests {
+
+    private func find(_ rows: [TreeNode], _ name: String) -> TreeNode? {
+        for r in rows {
+            if r.name == name { return r }
+            if let x = find(r.children, name) { return x }
+        }
+        return nil
+    }
+
+    @Test("今の年の呼び名と違う名前で当たったら、その名前が入る")
+    func differs() async throws {
+        let s = try await TestVault.sample()
+        let rows = Tree.build(s, kind: .place, year: 500, query: "エルデン市")
+        let row = try #require(find(rows, "王都エルデン"))
+        #expect(row.matchedName == "エルデン市")
+    }
+
+    @Test("今の年の呼び名で当たったら、何も入らない")
+    func same() async throws {
+        let s = try await TestVault.sample()
+        let rows = Tree.build(s, kind: .place, year: 500, query: "王都エルデン")
+        let row = try #require(find(rows, "王都エルデン"))
+        #expect(row.matchedName == nil)
+    }
+
+    @Test("複数当たったら、最も新しい年のものを採る")
+    func newest() async throws {
+        let s = try await TestVault.sample()
+        // 「エルデン」は 保存名 エルデン邑・王都エルデン・エルデン市 の三つに当たる。
+        // 500 年の呼び名は 王都エルデン なので、残るのは エルデン邑 と エルデン市。
+        let rows = Tree.build(s, kind: .place, year: 500, query: "エルデン")
+        let row = try #require(find(rows, "王都エルデン"))
+        #expect(row.matchedName == "エルデン市")
+    }
+
+    @Test("絞り込んでいないときは何も入らない")
+    func noQuery() async throws {
+        let s = try await TestVault.sample()
+        let rows = Tree.build(s, kind: .place, year: 500)
+        #expect(rows.allSatisfy { $0.matchedName == nil })
+    }
+
+    @Test("祖先として残っただけの行には何も入らない")
+    func ancestor() async throws {
+        let s = try await TestVault.sample()
+        let rows = Tree.build(s, kind: .place, year: 500, query: "エルデン市")
+        let parent = try #require(rows.first { !$0.children.isEmpty })
+        #expect(parent.matchedName == nil)
+    }
+}

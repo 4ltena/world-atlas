@@ -74,11 +74,18 @@ struct TreeRow: View {
         HStack(spacing: 4) {
             Text(node.name)
             Spacer(minLength: 4)
+            // **印の三角を優先する。**右端は既に印が使う場所で、両方付く行は稀である
+            // （設計書 8.2）。
             if !node.flags.isEmpty {
                 Image(systemName: "exclamationmark.triangle")
                     .foregroundStyle(Palette.warning)
                     .help(Manuscript.flagOrder.filter { node.flags.contains($0) }
                         .map(\.rawValue).joined(separator: "、"))
+            } else if let m = node.matchedName {
+                Text("⟵ \(m)")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
             }
         }
         .contentShape(Rectangle())
