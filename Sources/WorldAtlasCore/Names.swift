@@ -10,24 +10,26 @@ extension Node {
 
     /// `name` がこの節点の呼び名として有効な期間。持っていない名前なら nil。
     ///
+    /// **`displayName(at:)` から導く。**同じことを二か所で別々に決めると食い違う——
+    /// 同じ年に別名が二つ書かれていたとき、木に出る名前と、この期間が指す名前が割れる。
+    /// 呼び名が変わりうるのは節点の始まりと各別名の始まりだけなので、その候補年でだけ引く。
+    /// 別名は一節点あたり数個なので、二重に走っても足りる。
+    ///
+    /// 返す期間は**必ず節点の生きている範囲に収まる。**節点の開始より前に始まる別名は
+    /// 開始年から効き、終わりより後に始まる別名は一度も出ないので nil になる。
     /// 終わりの `to` が nil なら「節点の終わりまで」で、そこが `現在` の節点なら
-    /// 呼ぶ側が世界の端で閉じる。**同じ名前へ二度戻る節点では、新しいほうを採る**——
-    /// 利用者がその名前で探すとき、探しているのはたいてい今に近いほうである（設計書 8.1）。
+    /// 呼ぶ側が世界の端で閉じる。同じ名前へ二度戻る節点では、**新しいほうの区間を採る。**
     public func period(ofName name: String) -> (from: Int, to: Int?)? {
-        // 境目は「次に始まる別名の前年」なので、始まりの年で並べ直してから見る。
-        // front matter に書かれた順は当てにできない。
-        var entries = aliases.sorted { $0.from < $1.from }
+        var years = [from]
+        for a in aliases where a.from > from { years.append(a.from) }
+        if let to { years = years.filter { $0 <= to } }
+        years = Array(Set(years)).sorted()
 
-        // 保存名も一覧の先頭に並べる。ただし別名が節点の開始と同時か、それより前に
-        // 始まっていると、保存名は一度も出ないので加えない（設計書 7 節）。
-        if entries.first.map({ $0.from > from }) ?? true {
-            entries.insert(Alias(from: from, name: self.name), at: 0)
-        }
-
-        // 同じ名前が複数回現れても、最も新しいもの（＝一覧の最後）を採る。
-        guard let i = entries.lastIndex(where: { $0.name == name }) else { return nil }
-        let start = entries[i].from
-        let next = i + 1 < entries.count ? entries[i + 1].from - 1 : to
-        return (start, next)
+        guard let last = years.indices.last(where: { displayName(at: years[$0]) == name })
+        else { return nil }
+        // ひと続きの区間の始まりまで遡る。間に別の名前を挟んでいたら、そこで切れている。
+        var first = last
+        while first > 0, displayName(at: years[first - 1]) == name { first -= 1 }
+        return (years[first], last + 1 < years.count ? years[last + 1] - 1 : to)
     }
 }

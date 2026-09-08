@@ -85,4 +85,38 @@ struct NamePeriodTests {
         #expect(p.from == 200)
         #expect(p.to == 300)
     }
+
+    @Test("節点の開始より前に始まる別名は、開始年から効く")
+    func aliasBeforeNodeStart() throws {
+        let n = Node(name: "甲", kind: .polity, category: "勢力", from: 100, to: 200,
+                     aliases: [Alias(from: 50, name: "乙")])
+        let p = try #require(n.period(ofName: "乙"))
+        #expect(p.from == 100)          // 50 ではない
+        #expect(p.to == 200)
+        // 保存名は一度も出ない。
+        #expect(n.period(ofName: "甲") == nil)
+    }
+
+    @Test("節点の終わりより後に始まる別名は、一度も出ない")
+    func aliasAfterNodeEnd() throws {
+        let n = Node(name: "甲", kind: .polity, category: "勢力", from: 100, to: 200,
+                     aliases: [Alias(from: 300, name: "乙")])
+        #expect(n.period(ofName: "乙") == nil)
+        let p = try #require(n.period(ofName: "甲"))
+        #expect(p.to == 200)            // 299 ではない
+    }
+
+    @Test("同じ年に別名が二つあるとき、displayName が出すほうだけが期間を持つ")
+    func sameYearAliases() throws {
+        let n = Node(name: "甲", kind: .polity, category: "勢力", from: 1, to: 200,
+                     aliases: [Alias(from: 100, name: "乙"), Alias(from: 100, name: "丙")])
+        // displayName は同年なら先に書かれたほうを出す。期間はそれに従う。
+        #expect(n.displayName(at: 100) == "乙")
+        let p = try #require(n.period(ofName: "乙"))
+        #expect(p.from == 100)
+        #expect(p.to == 200)
+        #expect(n.period(ofName: "丙") == nil)
+        let saved = try #require(n.period(ofName: "甲"))
+        #expect(saved.to == 99)
+    }
 }
