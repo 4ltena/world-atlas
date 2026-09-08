@@ -59,6 +59,12 @@ struct OverviewTests {
         #expect(OverviewStore.state(vault: v, year: 500, digest: "aaaa", hasMaterial: false) == .noMaterial)
     }
 
+    @Test("材料が無く、ファイルも無ければ 材料なし。未生成ではない")
+    func noMaterialWithoutFile() throws {
+        let v = try makeVault()
+        #expect(OverviewStore.state(vault: v, year: 500, digest: "aaaa", hasMaterial: false) == .noMaterial)
+    }
+
     @Test("front matter が壊れていても落ちない。未生成として扱う")
     func broken() throws {
         let v = try makeVault()
